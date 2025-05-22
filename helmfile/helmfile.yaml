@@ -1,0 +1,271 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+repositories:
+  # Add all repositories used in the helm scripts
+  - name: metallb
+    url: https://metallb.github.io/metallb
+  - name: ingress-nginx
+    url: https://kubernetes.github.io/ingress-nginx
+  - name: jetstack
+    url: https://charts.jetstack.io
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+  - name: cockroachdb
+    url: https://charts.cockroachdb.com/
+  - name: external-dns
+    url: https://kubernetes-sigs.github.io/external-dns/
+  - name: gitea
+    url: https://dl.gitea.io/charts
+
+releases:
+  - name: metallb
+    namespace: metallb-system
+    chart: metallb/metallb
+    version: 0.14.5
+
+  - name: ip-ranges
+    namespace: metallb-system
+    chart: charts/ip-ranges
+    needs:
+      - metallb
+    values:
+      - ipRange: "{{ .Values.loadBalancing.ipRange }}"
+
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: v1.14.5
+    values:
+      - installCRDs: true
+
+  - name: letsencrypt-prod
+    namespace: cert-manager
+    chart: charts/letsencrypt-prod
+    needs:
+      - cert-manager
+    values:
+      - cloudflareToken: "{{ .Values.letsEncrypt.cloudflareAccount }}"
+        cloudflareAccount: "{{ .Values.letsEncrypt.cloudflareToken }}"
+
+  - name: mikrotik-creds
+    namespace: external-dns
+    chart: charts/mikrotik-creds
+    values:
+      - mikrotik:
+          baseUrl: "{{ .Values.externalDns.mikrotikBaseUrl }}"
+          username: "{{ .Values.externalDns.mikrotikUsername }}"
+          password: "{{ .Values.externalDns.mikrotikPassword }}"
+
+  - name: external-dns
+    namespace: external-dns
+    chart: external-dns/external-dns
+    needs:
+     - mikrotik-creds
+    version: 1.15.0
+    values:
+      - interval: 5s
+        sources:
+          - ingress
+          - service
+          - crd
+        domainFilters:
+          - zengarden.space
+        provider:
+          name: webhook
+          webhook:
+            image:
+              repository: "ghcr.io/mirceanton/external-dns-provider-mikrotik"
+              tag: "v1.4.4@sha256:d51055ef8f9311373e0b16057b34dbbb393a8f29248431f4ddd9279a417f602d"
+              pullPolicy: IfNotPresent
+            env:
+              - name: LOG_FORMAT
+                value: json
+              - name: LOG_LEVEL
+                value: debug
+              - name: MIKROTIK_DEFAULT_TTL
+                value: "1800"
+              - name: MIKROTIK_DEFAULT_COMMENT
+                value: Managed by ExternalDNS
+              - name: MIKROTIK_BASEURL
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_BASEURL
+              - name: MIKROTIK_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_USERNAME
+              - name: MIKROTIK_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_PASSWORD
+              - name: MIKROTIK_SKIP_TLS_VERIFY
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_SKIP_TLS_VERIFY
+            livenessProbe:
+              httpGet:
+                path: /healthz
+                port: http-webhook
+              initialDelaySeconds: 10
+              timeoutSeconds: 5
+            readinessProbe:
+              httpGet:
+                path: /readyz
+                port: http-webhook
+              initialDelaySeconds: 10
+              timeoutSeconds: 5
+        extraArgs:
+          - --ignore-ingress-tls-spec
+          - --managed-record-types=A
+          - --managed-record-types=AAAA
+          - --managed-record-types=CNAME
+          - --managed-record-types=TXT
+          - --managed-record-types=MX
+          - --managed-record-types=SRV
+          - --managed-record-types=NS
+
+  - name: ingress-nginx
+    namespace: ingress-nginx
+    chart: ingress-nginx/ingress-nginx
+    values:
+      - controller:
+          progressDeadlineSeconds: 10
+
+  - name: vm
+    namespace: victoria-metrics
+    createNamespace: true
+    chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
+    version: 0.48.1
+    values:
+      - grafana:
+          ingress:
+            enabled: true
+            hosts:
+              - grafana.zengarden.space
+            annotations:
+              kubernetes.io/ingress.class: nginx
+              cert-manager.io/cluster-issuer: "letsencrypt-prod"
+            tls:
+              - secretName: grafana-tls
+                hosts:
+                  - grafana.zengarden.space
+
+  - name: node-exporter
+    namespace: node-exporter
+    chart: oci://registry-1.docker.io/bitnamicharts/node-exporter
+    version: 4.5.13
+    
+  - name: argocd
+    namespace: argocd
+    createNamespace: true
+    chart: argo/argo-cd
+    values:
+      - createAggregateRoles: true
+
+        global:
+          domain: argocd.zengarden.space
+
+        redis-ha:
+          enabled: true
+
+        controller:
+          replicas: 1
+
+        server:
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+            extraTls:
+              - hosts:
+                  - argocd.zengarden.space
+                secretName: argocd-tls
+
+        repoServer:
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+
+        applicationSet:
+          replicas: 2
+
+        configs:
+          params:
+            server.insecure: true
+
+  - name: docker-hub
+    namespace: gitea
+    chart: charts/docker-hub
+    values:
+      - username: "{{ .Values.DOCKER_IO_USER }}"
+        password: "{{ .Values.DOCKER_IO_PASSWORD }}"
+
+  - name: gitea
+    namespace: gitea
+    createNamespace: true
+    chart: gitea/gitea
+    version: 11.0.1
+    needs:
+      - docker-hub
+    values:
+      - gitea:
+          admin:
+            password: '{{ .Values.GITEA_PASSWORD }}'
+          actions:
+            enabled: true
+        persistence:
+          enabled: true
+          size: 10Gi
+        metrics:
+          enabled: true
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - host: gitea.zengarden.space
+              paths:
+                - path: /
+                  pathType: Prefix
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: 100m
+          tls:
+            - hosts:
+                - gitea.zengarden.space
+              secretName: gitea-tls
+        global:
+          imagePullSecrets:
+            - docker-hub
+        deployment:
+          env:
+            - name: GITEA__ACTIONS__ENABLED
+              value: "true"
+
+  - name: minio
+    namespace: minio
+    createNamespace: true
+    chart: oci://registry-1.docker.io/bitnamicharts/minio
+    version: 16.0.10
+    values:
+      - mode: distributed
+        auth:
+          rootUser: admin
+          rootPassword: '{{ .Values.MINIO_PASSWORD }}'
+        ingress:
+          enabled: true
+          hostname: minio.zengarden.space
+          tls: true
+          annotations:
+            kubernetes.io/ingress.class: nginx
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"

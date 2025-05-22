@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: gitea-action-runner-cache
+  name: gitea-action-runner-cache
+  namespace: gitea
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitea-action-runner-cache
+  template:
+    metadata:
+      labels:
+        app: gitea-action-runner-cache
+    spec:
+      volumes:
+      - name: cache-data
+        persistentVolumeClaim:
+          claimName: runner-cache
+      containers:
+      - name: runner
+        image: gitea/act_runner:0.2.11
+        command: ["/usr/local/bin/act_runner", "cache-server", "-p", "8080", "-d", "/data"]
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        volumeMounts:
+        - name: cache-data
+          mountPath: /data

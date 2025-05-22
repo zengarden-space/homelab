@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-action-runner-config
+  namespace: gitea
+data:
+  config.yaml: |-
+    runner:
+      capacity: 1
+    cache:
+      enabled: true
+      external_server: "http://gitea-action-runner-cache"
+    container:
+      privileged: true
+      workdir_parent: /data/workspace
+    host:
+      workdir_parent: /data/act
