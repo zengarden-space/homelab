@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-token-generator
+spec:
+  template:
+    spec:
+      serviceAccountName: gitea-token-generator
+      restartPolicy: Never
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      initContainers:
+      - name: wait-for-gitea
+        image: busybox:1.36
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for Gitea service to be available..."
+          until nslookup gitea-http.gitea.svc.cluster.local; do
+            echo "Waiting for gitea-http service..."
+            sleep 5
+          done
+          echo "Gitea service is available"
+          
+          echo "Waiting for Gitea to be ready..."
+          until wget --spider --timeout=10 --tries=1 http://gitea-http.gitea.svc.cluster.local:3000/api/healthz 2>/dev/null; do
+            echo "Waiting for Gitea to be ready..."
+            sleep 10
+          done
+          echo "Gitea is ready"
+      containers:
+      - name: token-generator
+        image: bitnami/kubectl:1.33.1
+        command: ['sh', '-c']
+        args:
+        - |
+          set -e
+          
+          echo "Generating runner token..."
+          
+          # For now, generate a UUID-based token as a placeholder
+          # In a real implementation, you would call the Gitea API or CLI
+          TOKEN=$(cat /proc/sys/kernel/random/uuid | tr -d '-')
+          
+          echo "Generated token: $TOKEN"
+          
+          # Create the secret
+          cat << EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: gitea-action-runner
+          stringData:
+            token: "$TOKEN"
+          EOF
+          
+          echo "Secret created successfully"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

@@ -19,6 +19,10 @@ repositories:
     url: https://kubernetes-sigs.github.io/external-dns/
   - name: gitea
     url: https://dl.gitea.io/charts
+  - name: rancher
+    url: https://releases.rancher.com/server-charts/latest
+  - name: vmware-tanzu
+    url: https://vmware-tanzu.github.io/helm-charts
 
 releases:
   - name: metallb
@@ -32,7 +36,7 @@ releases:
     needs:
       - metallb
     values:
-      - ipRange: "{{ .Values.loadBalancing.ipRange }}"
+      - ipRange: {{ .Values.loadBalancing.ipRange | quote }}
 
   - name: cert-manager
     namespace: cert-manager
@@ -47,17 +51,17 @@ releases:
     needs:
       - cert-manager
     values:
-      - cloudflareToken: "{{ .Values.letsEncrypt.cloudflareAccount }}"
-        cloudflareAccount: "{{ .Values.letsEncrypt.cloudflareToken }}"
+      - cloudflareToken: {{ .Values.letsEncrypt.cloudflareToken | quote }}
+        cloudflareAccount: {{ .Values.letsEncrypt.cloudflareAccount | quote }}
 
   - name: mikrotik-creds
     namespace: external-dns
     chart: charts/mikrotik-creds
     values:
       - mikrotik:
-          baseUrl: "{{ .Values.externalDns.mikrotikBaseUrl }}"
-          username: "{{ .Values.externalDns.mikrotikUsername }}"
-          password: "{{ .Values.externalDns.mikrotikPassword }}"
+          baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
+          username: {{ .Values.externalDns.mikrotikUsername | quote }}
+          password: {{ .Values.externalDns.mikrotikPassword | quote }}
 
   - name: external-dns
     namespace: external-dns
@@ -137,10 +141,11 @@ releases:
     values:
       - controller:
           progressDeadlineSeconds: 10
+          networkPolicy:
+            enabled: true
 
   - name: vm
     namespace: victoria-metrics
-    createNamespace: true
     chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
     version: 0.48.1
     values:
@@ -156,15 +161,16 @@ releases:
               - secretName: grafana-tls
                 hosts:
                   - grafana.zengarden.space
+        prometheus-node-exporter:
+          hostNetwork: false
 
   - name: node-exporter
     namespace: node-exporter
     chart: oci://registry-1.docker.io/bitnamicharts/node-exporter
     version: 4.5.13
-    
+
   - name: argocd
     namespace: argocd
-    createNamespace: true
     chart: argo/argo-cd
     values:
       - createAggregateRoles: true
@@ -208,27 +214,36 @@ releases:
     namespace: gitea
     chart: charts/docker-hub
     values:
-      - username: "{{ .Values.DOCKER_IO_USER }}"
-        password: "{{ .Values.DOCKER_IO_PASSWORD }}"
+      - username: {{ .Values.dockerHub.username | quote}}
+        password: {{ .Values.dockerHub.password | quote }}
 
   - name: gitea
     namespace: gitea
-    createNamespace: true
     chart: gitea/gitea
-    version: 11.0.1
+    version: 11.0.0
     needs:
       - docker-hub
     values:
-      - gitea:
+      - replicaCount: 1
+        gitea:
           admin:
-            password: '{{ .Values.GITEA_PASSWORD }}'
+            password: {{ .Values.gitea.password | quote }}
           actions:
             enabled: true
         persistence:
           enabled: true
-          size: 10Gi
+          size: 50Gi
         metrics:
           enabled: true
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
         ingress:
           enabled: true
           className: nginx
@@ -239,7 +254,7 @@ releases:
                   pathType: Prefix
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
-            nginx.ingress.kubernetes.io/proxy-body-size: 100m
+            nginx.ingress.kubernetes.io/proxy-body-size: 500m
           tls:
             - hosts:
                 - gitea.zengarden.space
@@ -251,17 +266,33 @@ releases:
           env:
             - name: GITEA__ACTIONS__ENABLED
               value: "true"
+        postgresql-ha:
+          service:
+            ports:
+              postgresql: 5432
+        valkey-cluster:
+          service:
+            ports:
+              valkey: 6379
+
+  - name: gitea-runner
+    namespace: gitea-runner
+    chart: charts/gitea-runner
+    values:
+     - gitea:
+         admin:
+           username: gitea
+           password: {{ .Values.gitea.password | quote }}
 
   - name: minio
     namespace: minio
-    createNamespace: true
     chart: oci://registry-1.docker.io/bitnamicharts/minio
     version: 16.0.10
     values:
       - mode: distributed
         auth:
           rootUser: admin
-          rootPassword: '{{ .Values.MINIO_PASSWORD }}'
+          rootPassword: {{ .Values.minio.password | quote }}
         ingress:
           enabled: true
           hostname: minio.zengarden.space
@@ -269,3 +300,46 @@ releases:
           annotations:
             kubernetes.io/ingress.class: nginx
             cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+  - name: velero
+    namespace: velero
+    chart: vmware-tanzu/velero
+    version: 7.0.0
+    values:
+      - configuration:
+          backupStorageLocation:
+          - name: default
+            bucket: blade-cluster-zengarden-space
+            default: true
+            provider: aws
+            credential:
+              name: test-credential
+              key: test-key
+            config:
+              region: eu-central-1
+              profile: eu-central-1-profile
+          volumeSnapshotLocation:
+          - name: blade-cluster-zengarden-space
+            provider: aws
+            config:
+              region: eu-central-1
+        initContainers:
+          - name: velero-plugin-for-aws
+            image: velero/velero-plugin-for-aws:v1.8.0
+            volumeMounts:
+              - mountPath: /target
+                name: plugins
+        credentials:
+          useSecret: true
+          secretContents:
+            cloud: |
+              [default]
+              aws_access_key_id = admin
+              aws_secret_access_key = {{ .Values.minio.password | quote }}
+        schedules:
+          all-namespaces-daily:
+            schedule: "0 0 * * *"
+            template:
+              ttl: "240h"
+              includedNamespaces:
+                - "*"

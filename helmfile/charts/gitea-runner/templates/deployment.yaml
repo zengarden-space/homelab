@@ -15,13 +15,17 @@ spec:
       labels:
         app: gitea-action-runner-cache
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
       volumes:
       - name: cache-data
         persistentVolumeClaim:
           claimName: runner-cache
       containers:
       - name: runner
-        image: gitea/act_runner:0.2.11
+        image: {{ .Values.runner.image | quote }}
         command: ["/usr/local/bin/act_runner", "cache-server", "-p", "8080", "-d", "/data"]
         ports:
         - containerPort: 8080

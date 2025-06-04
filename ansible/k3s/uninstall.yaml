@@ -1,9 +1,36 @@
+- name: Uninstall cilium
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Helm uninstall cilium
+      shell: |-
+        export KUBECONFIG=/etc/rancher/k3s/config.yaml 
+        helm uninstall cilium -n kube-system || true
+    - name: Clean iptables
+      shell: |-
+        # Delete Cilium rules from built-in chains
+        sudo iptables -D FORWARD -j CILIUM_FORWARD || true
+        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT || true
+        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST || true
+        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE || true
+        
+        # Flush and delete Cilium chains
+        for table in filter nat mangle; do
+          for chain in $(sudo iptables -t $table -S | grep CILIUM | awk '{print $2}' | sort | uniq); do
+            sudo iptables -t $table -F $chain || true
+            sudo iptables -t $table -X $chain || true
+          done
+        done
+        
+        echo "Cilium iptables rules left:"
+        sudo iptables -S | grep CILIUM
+        sudo iptables -t nat -S | grep CILIUM
+
+
 - name: Uninstall k3s on workers
   become: true
   hosts: workers
   tasks:
-    - name: Ping hosts
-      ansible.builtin.ping:
     - name: Check if k3s-agent-uninstall.sh exists
       ansible.builtin.stat:
         path: /usr/local/bin/k3s-agent-uninstall.sh
@@ -16,8 +43,6 @@
   become: true
   hosts: masters
   tasks:
-    - name: Ping hosts
-      ansible.builtin.ping:
     - name: Check if k3s-uninstall.sh exists
       ansible.builtin.stat:
         path: /usr/local/bin/k3s-uninstall.sh
@@ -30,8 +55,6 @@
   become: true
   hosts: bootstrapMaster
   tasks:
-    - name: Ping hosts
-      ansible.builtin.ping:
     - name: Check if k3s-uninstall.sh exists
       ansible.builtin.stat:
         path: /usr/local/bin/k3s-uninstall.sh

@@ -1,0 +1,18 @@
+- name: Fix flash-kernel bug
+  become: true
+  hosts: all
+  tasks:
+    - name: Ping hosts
+      ansible.builtin.ping:
+    - name: Proposed ubuntu repo
+      shell: |-
+        sudo tee <<EOF /etc/apt/sources.list.d/ubuntu-$(lsb_release -cs)-proposed.list
+        # Enable Ubuntu proposed archive
+        deb http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-proposed restricted main multiverse universe
+        EOF
+    - name: Update apt packages
+      command: sudo apt-get update
+    - name: Install flash kernel
+      command: sudo apt install -t plucky-proposed flash-kernel
+    - name: Restart pi
+      ansible.builtin.reboot:

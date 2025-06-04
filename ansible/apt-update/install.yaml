@@ -1,0 +1,89 @@
+- name: Update all packages on blade servers
+  become: true
+  hosts: all
+  tasks:
+    - name: Ping hosts
+      ansible.builtin.ping:
+      
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      register: apt_update_result
+      
+    - name: Display available updates
+      command: apt list --upgradable
+      register: upgradable_packages
+      changed_when: false
+      
+    - name: Show upgradable packages
+      debug:
+        var: upgradable_packages.stdout_lines
+        
+    - name: Upgrade all packages to latest version
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      register: apt_upgrade_result
+      
+    - name: Remove unused dependencies
+      apt:
+        autoremove: yes
+        
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      
+    - name: Display reboot requirement
+      debug:
+        msg: "Reboot is required for {{ inventory_hostname }}"
+      when: reboot_required.stat.exists
+      
+    - name: Add hosts requiring reboot to a group
+      add_host:
+        name: "{{ inventory_hostname }}"
+        groups: reboot_required
+      when: reboot_required.stat.exists
+        
+    - name: Display update summary
+      debug:
+        msg: 
+          - "Update completed on {{ inventory_hostname }}"
+          - "Packages upgraded: {{ apt_upgrade_result.upgraded | default(0) }}"
+          - "Packages newly installed: {{ apt_upgrade_result.installed | default(0) }}"
+          - "Packages removed: {{ apt_upgrade_result.removed | default(0) }}"
+          
+- name: Ask for reboot confirmation
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    reboot_hosts: "{{ groups.reboot_required | default([]) }}"
+  tasks:
+    - name: Display reboot required hosts
+      debug:
+        msg: "The following hosts require a reboot: {{ reboot_hosts | join(', ') }}"
+      when: reboot_hosts | length > 0
+      
+    - name: Prompt for reboot confirmation
+      pause:
+        prompt: "Do you want to reboot these hosts? (yes/no)"
+      register: reboot_confirmation
+      when: reboot_hosts | length > 0
+      
+    - name: Set reboot flag
+      set_fact:
+        perform_reboot: "{{ reboot_confirmation.user_input | lower == 'yes' }}"
+      when: reboot_hosts | length > 0
+      
+- name: Reboot hosts if needed
+  become: true
+  hosts: reboot_required
+  tasks:
+    - name: Reboot the servers
+      reboot:
+        reboot_timeout: 600
+        msg: "Rebooting after system updates"
+      when: hostvars['localhost'].perform_reboot | default(false) | bool

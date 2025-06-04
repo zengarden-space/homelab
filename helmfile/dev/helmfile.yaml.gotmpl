@@ -1,0 +1,51 @@
+environments:
+  default:
+    values:
+      - ../env.yaml
+---
+repositories:
+  - name: vmware-tanzu
+    url: https://vmware-tanzu.github.io/helm-charts
+
+releases:
+
+
+  - name: velero
+    namespace: velero
+    chart: vmware-tanzu/velero
+    version: 7.0.0
+    values:
+      - configuration:
+          defaultVolumesToFsBackup: true
+          backupStorageLocation:
+          - name: default
+            bucket: zengarden.space-cluster-backup
+            default: true
+            provider: aws
+            config:
+              region: eu-central-1
+          volumeSnapshotLocation:
+          - name: default
+            provider: aws
+            config:
+              region: eu-central-1
+        initContainers:
+          - name: velero-plugin-for-aws
+            image: velero/velero-plugin-for-aws:v1.12.1
+            volumeMounts:
+              - mountPath: /target
+                name: plugins
+        credentials:
+          useSecret: true
+          secretContents:
+            cloud: |
+              [default]
+              aws_access_key_id = {{ .Values.veleroBackup.awsAccessKey }}
+              aws_secret_access_key = {{ .Values.veleroBackup.awsSecretKey }}
+        schedules:
+          all-namespaces-daily:
+            schedule: "0 * * * *"
+            template:
+              ttl: "240h"
+              includedNamespaces:
+                - "*"

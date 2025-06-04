@@ -1,0 +1,12 @@
+gitea:
+  url: "https://gitea.zengarden.space"
+  image: "docker.gitea.com/gitea:1.23.8-rootless"
+  admin:
+    username: ""
+    password: ""
+
+runner:
+  replicas: 4
+  image: "gitea/act_runner:0.2.11"
+
+imagePullSecrets: {}

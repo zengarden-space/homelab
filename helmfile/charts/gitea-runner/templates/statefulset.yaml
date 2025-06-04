@@ -6,7 +6,7 @@ metadata:
   name: gitea-action-runner
   namespace: gitea
 spec:
-  replicas: 4
+  replicas: {{ .Values.runner.replicas | default 4 }}
   serviceName: gitea-action-runner
   selector:
     matchLabels:
@@ -16,6 +16,10 @@ spec:
       labels:
         app: gitea-action-runner
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
       volumes:
       - name: docker-certs
         emptyDir: {}
@@ -26,14 +30,14 @@ spec:
           name: gitea-action-runner-config
       containers:
       - name: runner
-        image: gitea/act_runner:0.2.11
+        image: {{ .Values.runner.image | quote }}
         command: ["sh", "-c", "while ! nc -z localhost 2376 </dev/null; do echo 'waiting for docker daemon...'; sleep 5; done; /sbin/tini -- /opt/act/run.sh"]
         imagePullPolicy: Always
         env:
         - name: CONFIG_FILE
           value: /config/config.yaml
         - name: GITEA_INSTANCE_URL
-          value: https://gitea.zengarden.space/
+          value: {{ .Values.gitea.url | quote }}
         - name: GITEA_RUNNER_REGISTRATION_TOKEN
           valueFrom:
             secretKeyRef:

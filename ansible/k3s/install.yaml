@@ -1,0 +1,391 @@
+- name: System setup
+  become: true
+  hosts: pies
+  tasks:
+    - name: Ping hosts
+      ping:
+    - name: Update apt packages
+      command: sudo apt-get update
+    - name: Check if kernel parameters set
+      stat:
+        path: /etc/sysctl.d/90-kubelet.conf
+      register: kubeletConfExists
+    - name: kubelet kernel parameters
+      shell: |-
+        set -euxo pipefail
+        tee /etc/sysctl.d/90-kubelet.conf <<'EOF'
+        vm.panic_on_oom=0
+        vm.overcommit_memory=1
+        kernel.panic=10
+        kernel.panic_on_oops=1
+        EOF
+      when: "not kubeletConfExists.stat.exists"
+    - name: Check if cgroups are enabled
+      command: cat /boot/firmware/cmdline.txt
+      register: cmdlineContent
+    - name: Enable cgroups
+      command: sed -i -e 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/firmware/cmdline.txt
+      when: "'cgroup_memory=1 cgroup_enable=memory' not in cmdlineContent.stdout"
+      notify:
+        - Restart pi
+  handlers:
+    - name: Restart pi
+      reboot:
+
+- name: Prep servers
+  become: true
+  hosts: [bootstrapMaster, masters]
+  tasks:
+    - name: Ensure directory /var/lib/rancher/k3s/server exists
+      file:
+        path: /var/lib/rancher/k3s/server
+        state: directory
+        mode: '0600'
+        owner: root
+        group: root
+      notify:
+        - Restart k3s
+    - name: Ensure directory /etc/rancher/k3s exists
+      file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: '0600'
+        owner: root
+        group: root
+      notify:
+        - Restart k3s
+    - name: Put PSA policy
+      copy:
+        content: |-
+          apiVersion: apiserver.config.k8s.io/v1
+          kind: AdmissionConfiguration
+          plugins:
+          - name: PodSecurity
+            configuration:
+              apiVersion: pod-security.admission.config.k8s.io/v1beta1
+              kind: PodSecurityConfiguration
+              defaults:
+                enforce: "restricted"
+                enforce-version: "latest"
+                audit: "restricted"
+                audit-version: "latest"
+                warn: "restricted"
+                warn-version: "latest"
+              exemptions:
+                usernames: []
+                runtimeClasses: []
+                namespaces: [kube-system, longhorn-system, velero, metallb-system, victoria-metrics, gitea-runner]
+          - name: EventRateLimit
+            configuration:
+              apiVersion: eventratelimit.admission.k8s.io/v1alpha1
+              kind: Configuration
+              limits:
+                - type: Server
+                  qps: 50
+                  burst: 100
+                - type: Namespace
+                  qps: 10
+                  burst: 20
+                - type: User
+                  qps: 20
+                  burst: 30
+        dest: /var/lib/rancher/k3s/server/psa.yaml
+      notify:
+        - Restart k3s
+    - name: Put audit policy
+      copy:
+        content: |-
+          apiVersion: audit.k8s.io/v1
+          kind: Policy
+          rules:
+          - level: Metadata
+        dest: /var/lib/rancher/k3s/server/audit.yaml
+      notify:
+        - Restart k3s
+    - name: Put k3s config
+      copy:
+        content: |-
+          write-kubeconfig-mode: "0600"
+          flannel-backend: "none"
+          disable-network-policy: true
+          disable:
+            - servicelb
+            - traefik
+          cluster-cidr: "10.42.0.0/16"
+          service-cidr: "10.43.0.0/16"
+          # Hardened security
+          protect-kernel-defaults: true
+          secrets-encryption: true
+          kube-apiserver-arg:
+            - "enable-admission-plugins=NodeRestriction,EventRateLimit"
+            - 'admission-control-config-file=/var/lib/rancher/k3s/server/psa.yaml'
+            - 'audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log'
+            - 'audit-policy-file=/var/lib/rancher/k3s/server/audit.yaml'
+            - 'audit-log-maxage=30'
+            - 'audit-log-maxbackup=10'
+            - 'audit-log-maxsize=100'
+          kube-controller-manager-arg:
+            - 'terminated-pod-gc-threshold=10'
+          kubelet-arg:
+            - 'streaming-connection-idle-timeout=5m'
+            - "tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+            - "pod-max-pids=1000"
+          embedded-registry: true
+        dest: /etc/rancher/k3s/config.yaml
+      notify:
+        - Restart k3s
+    - name: Put registries.yaml config
+      copy:
+        content: |-
+          mirrors:
+            "*":
+        dest: /etc/rancher/k3s/registries.yaml
+      notify:
+        - Restart k3s
+  handlers:
+    - name: Restart k3s
+      shell: 'sudo systemctl restart k3s 2>/dev/null || echo "skipping"'
+
+- name: Install k3s bootstrap server
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Ping host
+      ping:
+    - name: Install k3s bootstrap server
+      shell: |-
+        set -euxo pipefail
+        curl -sfL https://get.k3s.io |\
+          INSTALL_K3S_EXEC="server --cluster-init"  \ 
+          INSTALL_K3S_VERSION={{ k3s_version }} \
+          K3S_NODE_NAME={{ inventory_hostname }} \
+          K3S_KUBECONFIG_MODE="644" \
+          sh -s -
+    - name: Extract K3S_TOKEN from server output
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      failed_when: k3s_token.failed or k3s_token.stdout is undefined
+    - name: Set K3S_TOKEN as a fact
+      set_fact:
+        k3s_token: "{{ k3s_token.stdout }}"
+
+- name: Install k3s servers
+  become: true
+  hosts: masters
+  tasks:
+    - name: Install k3s servers
+      shell: |-
+        set -euxo pipefail
+        curl -sfL https://get.k3s.io |\
+        INSTALL_K3S_EXEC="server" \
+        INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_URL=https://{{ hostvars['blade001']['ansible_default_ipv4'].address }}:6443 \
+        K3S_TOKEN={{ hostvars['blade001']['k3s_token'] }} \
+        K3S_NODE_NAME={{ inventory_hostname }} \
+        sh -s -
+
+- name: Harden security
+  become: true
+  hosts: [bootstrapMaster, masters]
+  tasks:
+    - name: Switch certificate permissions
+      command: chmod -R 600 /var/lib/rancher/k3s/server/tls
+
+- name: Install k3s workers
+  become: true
+  hosts: workers
+  tasks:
+    - name: Install k3s workers
+      shell: |-
+        set -euxo pipefail
+        curl -sfL https://get.k3s.io |\
+        INSTALL_K3S_EXEC="agent" \
+        INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_URL=https://{{ hostvars['blade001']['ansible_default_ipv4'].address }}:6443 \
+        K3S_TOKEN={{ hostvars['blade001']['k3s_token'] }} \
+        K3S_NODE_NAME={{ inventory_hostname }} \
+        sh -
+
+- name: Install CLI tools
+  become: true
+  hosts: pies
+  tasks:
+    - name: Check if kubectl exists
+      stat:
+        path: /usr/local/bin/kubectl
+      register: kubectlExists
+    - name: Install kubectl
+      when: "not kubectlExists.stat.exists"
+      shell: |-
+        set -euxo pipefail
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl"
+        sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+        rm kubectl
+    - name: Check if helm exists
+      stat:
+        path: /usr/bin/helm
+      register: helmExists
+    - name: Install helm
+      when: "not helmExists.stat.exists"
+      shell: |-
+        set -euxo pipefail
+        curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+        sudo apt-get install apt-transport-https --yes
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+        sudo apt-get update
+        sudo apt-get install helm
+    - name: Check if cilium exists
+      stat:
+        path: /usr/local/bin/cilium
+      register: ciliumExists
+    - name: Install cilium CLI
+      when: "not ciliumExists.stat.exists"
+      shell: |-
+        set -euxo pipefail
+        CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+        CLI_ARCH=amd64
+        if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+        curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
+        curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+        sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+        sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+        rm cilium-linux-${CLI_ARCH}.tar.gz
+        rm cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+
+- name: Install cilium
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Install cilium
+      shell: |-
+        set -euxo pipefail
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        helm repo add cilium https://helm.cilium.io/
+        helm repo update
+        helm upgrade --install cilium cilium/cilium --version 1.17.4 \
+          --namespace kube-system
+        
+        cilium status --wait
+        
+        kubectl get pods -n kube-system
+        kubectl wait pods --all -n kube-system --for=condition=Ready --timeout=15m
+
+- name: Install longhorn
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Install longhorn
+      shell: |-
+        set -euxo pipefail
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        cat > values.yaml << EOF
+        networkPolicies:
+          enabled: true
+          type: rke1
+        ingress:
+          enabled: true
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: 10000m
+          host: longhorn.{{ domain }}
+          ingressClassName: nginx
+          tls: true
+        EOF
+        
+        helm repo add longhorn https://charts.longhorn.io
+        helm repo update
+        helm upgrade --install longhorn longhorn/longhorn --version 1.9.0 \
+           --namespace longhorn-system \
+           --create-namespace \
+           --values values.yaml
+        rm values.yaml
+        
+        kubectl get pods -n longhorn-system
+        kubectl wait pods --all -n longhorn-system --for=condition=Ready --timeout=15m
+        kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+        
+        kubectl apply -f - <<'EOF'
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: longhorn-default-resource
+          namespace: longhorn-system
+        data:
+          default-resource.yaml: |
+            "backup-target": "s3://{{ backup_s3_bucket }}@eu-central-1/volumes"
+            "backup-target-credential-secret": "backup-bucket-creds"
+            "backupstore-poll-interval": "180"
+        EOF
+        
+        kubectl apply -n longhorn-system -f - <<EOF
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: backup-bucket-creds
+          namespace: longhorn-system
+        type: Opaque
+        stringData:
+          AWS_ACCESS_KEY_ID: {{ aws_access_key }}
+          AWS_SECRET_ACCESS_KEY: {{ aws_secret_access_key }}
+        EOF
+
+- name: Install velero
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Install velero
+      shell: |-
+        set -euxo pipefail
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        cat > values.yaml << EOF
+        configuration:
+          backupStorageLocation:
+            - name: default
+              bucket: {{ backup_s3_bucket }}
+              default: true
+              provider: aws
+              config:
+                region: eu-central-1
+          volumeSnapshotLocation:
+            - name: default
+              provider: aws
+              config:
+                region: eu-central-1
+        initContainers:
+          - name: velero-plugin-for-aws
+            image: velero/velero-plugin-for-aws:v1.12.1
+            volumeMounts:
+              - mountPath: /target
+                name: plugins
+        credentials:
+          useSecret: true
+          secretContents:
+            cloud: |
+              [default]
+              aws_access_key_id = {{ aws_access_key }}
+              aws_secret_access_key = {{ aws_secret_access_key }}
+        schedules:
+          all-namespaces-daily:
+            schedule: "0 0 * * *"
+            template:
+              ttl: "240h"
+              includedNamespaces:
+                - "*"
+        EOF
+        
+        helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
+        helm repo update
+        helm upgrade --install --namespace velero --create-namespace velero vmware-tanzu/velero --values values.yaml
+        rm values.yaml
+
+- name: Fetch k3s kubeconfig
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Fetch kubeconfig
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: k3sconfig
+        flat: true
