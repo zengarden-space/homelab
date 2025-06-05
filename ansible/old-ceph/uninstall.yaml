@@ -1,0 +1,250 @@
+- name: Uninstall Ceph cluster completely
+  become: true
+  hosts: pies
+  vars:
+    ceph_release: reef
+  tasks:
+    - name: Stop all Ceph services via cephadm
+      shell: |
+        for service in $(ceph orch ls --format json | jq -r '.[].service_name' 2>/dev/null || echo ""); do
+          ceph orch rm $service --force || true
+        done
+      ignore_errors: yes
+      when: inventory_hostname == groups['bootstrapMaster'][0]
+
+    - name: Remove host from Ceph cluster
+      command: ceph orch host rm {{ inventory_hostname }} --force
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      ignore_errors: yes
+      when: inventory_hostname != groups['bootstrapMaster'][0]
+
+    - name: Stop and disable all Ceph containers
+      shell: |
+        docker stop $(docker ps -q --filter "name=ceph") 2>/dev/null || true
+        docker rm $(docker ps -aq --filter "name=ceph") 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: Remove Ceph containers and volumes
+      shell: |
+        docker system prune -f --volumes
+        docker volume rm $(docker volume ls -q --filter "name=ceph") 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: Unmount Ceph filesystems
+      shell: |
+        umount -f /var/lib/ceph/*/ceph-* 2>/dev/null || true
+        umount -f /var/lib/ceph/* 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: Stop Ceph systemd services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - ceph.target
+        - ceph-mon.target
+        - ceph-mgr.target
+        - ceph-osd.target
+        - ceph-mds.target
+        - ceph-radosgw.target
+      ignore_errors: yes
+
+    - name: Remove Ceph packages
+      apt:
+        name:
+          - ceph
+          - ceph-common
+          - ceph-mon
+          - ceph-mgr
+          - ceph-osd
+          - ceph-mds
+          - ceph-radosgw
+          - cephadm
+          - libcephfs2
+          - librados2
+          - librbd1
+          - python3-ceph
+          - python3-cephfs
+          - python3-rados
+          - python3-rbd
+        state: absent
+        purge: yes
+      ignore_errors: yes
+
+    - name: Remove Ceph directories and data
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/ceph
+        - /var/lib/ceph
+        - /var/log/ceph
+        - /run/ceph
+        - /etc/systemd/system/ceph*
+        - /etc/systemd/system/multi-user.target.wants/ceph*
+
+    - name: Remove Ceph repository and GPG key
+      block:
+        - name: Remove Ceph repository
+          apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/ceph.gpg] https://download.ceph.com/debian-{{ ceph_release }}/ jammy main"
+            state: absent
+          ignore_errors: yes
+
+        - name: Remove Ceph GPG key file
+          file:
+            path: /etc/apt/keyrings/ceph.gpg
+            state: absent
+          ignore_errors: yes
+
+    - name: Remove Docker repository and GPG key (optional)
+      block:
+        - name: Remove Docker repository for ARM64
+          apt_repository:
+            repo: "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: absent
+          ignore_errors: yes
+          when: ansible_architecture == "aarch64"
+
+        - name: Remove Docker repository for x86_64
+          apt_repository:
+            repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: absent
+          ignore_errors: yes
+          when: ansible_architecture == "x86_64"
+
+        - name: Remove Docker GPG key file
+          file:
+            path: /etc/apt/keyrings/docker.gpg
+            state: absent
+          ignore_errors: yes
+
+        - name: Clean up keyring directory if empty
+          shell: |
+            if [ -d /etc/apt/keyrings ] && [ -z "$(ls -A /etc/apt/keyrings)" ]; then
+              rmdir /etc/apt/keyrings
+            fi
+          ignore_errors: yes
+      when: remove_docker | default(false) | bool
+
+    - name: Remove Docker packages (optional)
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: absent
+        purge: yes
+      ignore_errors: yes
+      when: remove_docker | default(false) | bool
+
+    - name: Remove system packages installed for Ceph (optional)
+      apt:
+        name:
+          - lvm2
+          - gdisk
+          - parted
+          - chrony
+        state: absent
+        purge: yes
+      ignore_errors: yes
+      when: remove_system_packages | default(false) | bool
+
+    - name: Clean up LVM volumes created by Ceph
+      shell: |
+        # Remove any LVM volumes that might have been created by Ceph OSDs
+        for vg in $(vgs --noheadings -o vg_name | grep ceph 2>/dev/null || echo ""); do
+          vgremove -f $vg || true
+        done
+        for pv in $(pvs --noheadings -o pv_name | xargs); do
+          pvremove -f $pv 2>/dev/null || true
+        done
+      ignore_errors: yes
+
+    - name: Clean up disk partitions created by Ceph
+      shell: |
+        # Warning: This will remove Ceph-created partitions
+        # Be careful if you have other important partitions
+        for disk in $(lsblk -d -n -o NAME,TYPE | grep disk | cut -d' ' -f1); do
+          sgdisk --zap-all /dev/$disk 2>/dev/null || true
+          dd if=/dev/zero of=/dev/$disk bs=1M count=100 2>/dev/null || true
+        done
+      ignore_errors: yes
+      when: cleanup_disks | default(false) | bool
+
+    - name: Remove ceph user and group
+      block:
+        - name: Remove ceph user
+          user:
+            name: ceph
+            state: absent
+            remove: yes
+          ignore_errors: yes
+
+        - name: Remove Ceph users and groups
+          group:
+            name: ceph
+            state: absent
+          ignore_errors: yes
+
+    - name: Remove user from docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        state: absent
+      ignore_errors: yes
+      when: remove_docker | default(false) | bool
+
+    - name: Stop and disable Docker service
+      systemd:
+        name: docker
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+      when: remove_docker | default(false) | bool
+
+    - name: Stop and disable chrony service
+      systemd:
+        name: chrony
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+      when: remove_system_packages | default(false) | bool
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+
+    - name: Clean up any remaining Ceph processes
+      shell: |
+        pkill -f ceph || true
+        pkill -f rados || true
+        pkill -f rbd || true
+      ignore_errors: yes
+
+    - name: Remove SSH keys for Ceph
+      shell: |
+        sed -i '/ceph/d' /root/.ssh/authorized_keys 2>/dev/null || true
+        rm -f /root/.ssh/id_rsa_ceph* 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: Final cleanup verification
+      shell: |
+        echo "Checking for remaining Ceph processes..."
+        ps aux | grep -v grep | grep ceph || echo "No Ceph processes found"
+        echo "Checking for remaining Ceph containers..."
+        docker ps -a | grep ceph || echo "No Ceph containers found"
+        echo "Cleanup completed!"
+      register: cleanup_verification
+      changed_when: false
+
+    - name: Display cleanup results
+      debug:
+        var: cleanup_verification.stdout_lines

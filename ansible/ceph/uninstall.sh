@@ -9,17 +9,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${RED}WARNING: This will completely remove Ceph cluster and ALL DATA!${NC}"
-echo -e "${YELLOW}This action cannot be undone.${NC}"
+echo -e "${YELLOW}WARNING: This will completely remove Ceph from all hosts!${NC}"
+echo -e "${RED}This action is IRREVERSIBLE and will destroy the cluster!${NC}"
+echo -e "${YELLOW}Storage data will NOT be automatically cleaned - use ceph-volumes runbook for that.${NC}"
 echo ""
-read -p "Are you sure you want to proceed? (type 'yes' to continue): " confirmation
+read -p "Are you sure you want to proceed? (type 'yes' to confirm): " confirm
 
-if [ "$confirmation" != "yes" ]; then
-    echo -e "${YELLOW}Uninstallation cancelled.${NC}"
+if [ "$confirm" != "yes" ]; then
+    echo -e "${GREEN}Operation cancelled.${NC}"
     exit 0
 fi
 
-echo -e "${RED}Starting Ceph cluster uninstallation...${NC}"
+echo -e "${GREEN}Starting Ceph cluster uninstallation...${NC}"
 
 # Check if required files exist
 if [ ! -f "hosts.yaml" ]; then
@@ -44,51 +45,15 @@ if ! command -v ansible-playbook &> /dev/null; then
     exit 1
 fi
 
-# Ask about disk cleanup and optional components
-echo ""
-echo -e "${YELLOW}Optional cleanup options:${NC}"
-read -p "Do you want to remove Docker components? (y/N): " remove_docker
-read -p "Do you want to remove system packages (chrony, lvm2, gdisk, parted)? (y/N): " remove_packages
-read -p "Do you want to clean up disk partitions created by Ceph? (y/N): " cleanup_disks
-
-EXTRA_VARS=""
-if [[ "$remove_docker" =~ ^[Yy]$ ]]; then
-    EXTRA_VARS="$EXTRA_VARS -e remove_docker=true"
-    echo -e "${YELLOW}Will remove Docker components${NC}"
-fi
-
-if [[ "$remove_packages" =~ ^[Yy]$ ]]; then
-    EXTRA_VARS="$EXTRA_VARS -e remove_system_packages=true"
-    echo -e "${YELLOW}Will remove system packages${NC}"
-fi
-
-if [[ "$cleanup_disks" =~ ^[Yy]$ ]]; then
-    EXTRA_VARS="$EXTRA_VARS -e cleanup_disks=true"
-    echo -e "${RED}WARNING: This will wipe Ceph-created partitions on all disks!${NC}"
-    read -p "Are you absolutely sure? (type 'yes' to continue): " disk_confirmation
-    if [ "$disk_confirmation" != "yes" ]; then
-        echo -e "${YELLOW}Disk cleanup cancelled. Proceeding with software-only removal.${NC}"
-        EXTRA_VARS=$(echo "$EXTRA_VARS" | sed 's/-e cleanup_disks=true//')
-    fi
-fi
-
-# Run pre-uninstallation checks
-echo -e "${YELLOW}Running pre-uninstallation checks...${NC}"
-ansible -i hosts.yaml pies -m ping
-
-if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}Warning: Cannot reach all hosts. Proceeding with available hosts only.${NC}"
-fi
-
 # Run the uninstallation playbook
-echo -e "${RED}Running Ceph uninstallation playbook...${NC}"
-ansible-playbook -i hosts.yaml uninstall.yaml -K $EXTRA_VARS
+echo -e "${GREEN}Running Ceph uninstallation playbook...${NC}"
+ansible-playbook -v -i hosts.yaml uninstall.yaml -K
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Ceph uninstallation completed successfully!${NC}"
-    echo -e "${YELLOW}All Ceph components have been removed from the cluster.${NC}"
+    echo -e "${YELLOW}Note: Storage devices may still contain Ceph data.${NC}"
+    echo -e "${YELLOW}Use ceph-volumes runbook to clean storage devices if needed.${NC}"
 else
-    echo -e "${RED}Uninstallation encountered some errors. Check the output above.${NC}"
-    echo -e "${YELLOW}You may need to manually clean up remaining components.${NC}"
+    echo -e "${RED}Uninstallation failed. Check the output above for errors.${NC}"
     exit 1
 fi

@@ -1,0 +1,130 @@
+---
+- name: Add NVMe storage to Ceph cluster
+  become: true
+  hosts: all
+  tasks:
+    - name: Check if Ceph cluster is operational
+      command: cephadm shell -- ceph status
+      register: ceph_status
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      run_once: true
+
+    - name: Fail if cluster is not operational
+      fail:
+        msg: "Ceph cluster is not operational. Please ensure the cluster is running before adding storage."
+      when: ceph_status.rc != 0
+      run_once: true
+
+    - name: Check if /dev/nvme0 exists
+      stat:
+        path: /dev/nvme0
+      register: nvme_device
+
+    - name: Display device check result
+      debug:
+        msg: "NVMe device /dev/nvme0 {{ 'found' if nvme_device.stat.exists else 'not found' }} on {{ inventory_hostname }}"
+
+    - name: Fail if NVMe device doesn't exist
+      fail:
+        msg: "NVMe device /dev/nvme0 not found on {{ inventory_hostname }}"
+      when: not nvme_device.stat.exists
+
+    - name: Check if device is already used by Ceph
+      command: cephadm shell -- ceph orch device ls --format json
+      register: ceph_devices
+      changed_when: false
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      run_once: true
+
+    - name: Parse Ceph device list
+      set_fact:
+        existing_devices: "{{ ceph_devices.stdout | from_json }}"
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      run_once: true
+
+    - name: Check if nvme0 is already added to this host
+      set_fact:
+        device_already_added: "{{ existing_devices | selectattr('hostname', 'equalto', inventory_hostname) | selectattr('path', 'search', '/dev/nvme0') | list | length > 0 }}"
+
+    - name: Display device status
+      debug:
+        msg: "Device /dev/nvme0 on {{ inventory_hostname }} is {{ 'already added' if device_already_added else 'available for addition' }}"
+
+    - name: Add NVMe device to Ceph cluster
+      command: >
+        cephadm shell -- ceph orch daemon add osd {{ inventory_hostname }}:/dev/nvme0
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      when: 
+        - nvme_device.stat.exists
+        - not device_already_added
+      register: add_osd_result
+
+    - name: Display OSD addition result
+      debug:
+        msg: "OSD added successfully for /dev/nvme0 on {{ inventory_hostname }}"
+      when: add_osd_result is defined and add_osd_result.changed
+
+    - name: Confirm device already in use
+      debug:
+        msg: "Device /dev/nvme0 on {{ inventory_hostname }} is already part of the Ceph cluster"
+      when: device_already_added
+
+- name: Display cluster status after storage addition
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Wait for OSDs to be created
+      pause:
+        seconds: 30
+        prompt: "Waiting for OSDs to be created and initialized..."
+      when: hostvars | dict2items | selectattr('value.add_osd_result', 'defined') | selectattr('value.add_osd_result.changed', 'equalto', true) | list | length > 0
+
+    - name: Get cluster status
+      command: cephadm shell -- ceph status
+      register: final_cluster_status
+      changed_when: false
+
+    - name: Display final cluster status
+      debug:
+        var: final_cluster_status.stdout_lines
+
+    - name: Get OSD status
+      command: cephadm shell -- ceph osd status
+      register: osd_status
+      changed_when: false
+
+    - name: Display OSD status
+      debug:
+        var: osd_status.stdout_lines
+
+    - name: Get cluster health details
+      command: cephadm shell -- ceph health detail
+      register: health_detail
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display health details
+      debug:
+        var: health_detail.stdout_lines
+      when: health_detail.rc == 0
+
+    - name: Display storage addition summary
+      debug:
+        msg:
+          - "=========================================="
+          - "     Storage Addition Complete!"
+          - "=========================================="
+          - ""
+          - "NVMe devices processed:"
+          - "{% for host in groups['all'] %}"
+          - "  {{ host }}: {{ hostvars[host]['device_already_added'] | default(false) | ternary('Already added', 'Added' if hostvars[host]['add_osd_result'] is defined and hostvars[host]['add_osd_result'].changed else 'Failed/Skipped') }}"
+          - "{% endfor %}"
+          - ""
+          - "Next steps:"
+          - "1. Verify OSD status: ceph osd status"
+          - "2. Check cluster health: ceph health detail"
+          - "3. Create pools if needed"
+          - "4. Configure storage classes for Kubernetes"
+          - "=========================================="

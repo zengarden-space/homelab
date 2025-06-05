@@ -40,11 +40,11 @@ ansible-playbook -v -i hosts.yaml install.yaml -K
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Ceph installation completed successfully!${NC}"
-    echo -e "${YELLOW}Next steps:${NC}"
-    echo -e "  1. Access dashboard at https://<bootstrap-master-ip>:8443"
-    echo -e "  2. Username: admin, Password: admin123"
-    echo -e "  3. Use ceph-volumes runbook to add storage devices"
-    echo -e "  4. Configure pools and storage classes as needed"
+    echo -e "${YELLOW}Dashboard access:${NC}"
+    echo -e "  URL: https://<bootstrap-master-ip>:8443"
+    echo -e "  Username: admin"
+    echo -e "  Password: admin123"
+    echo -e "${YELLOW}Check cluster status with: sudo ceph status${NC}"
 else
     echo -e "${RED}Installation failed. Check the output above for errors.${NC}"
     exit 1

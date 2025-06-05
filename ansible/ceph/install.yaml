@@ -1,17 +1,10 @@
-- name: Install Ceph with prerequisites
+---
+- name: Install Ceph prerequisites
   become: true
-  hosts: bootstrapMaster,otherHosts
+  hosts: all
   vars:
     ceph_release: reef
-    docker_compose_version: "2.20.0"
-    # NVMe configuration for Ceph OSDs
-    nvme_device: "/dev/nvme0n1"  # Primary NVMe device
-    force_disk_wipe: false       # Set to true to force wipe even if data exists
-    skip_disk_preparation: false # Set to true to skip disk prep if already done
   tasks:
-    - name: Ping hosts
-      ansible.builtin.ping:
-
     - name: Update apt packages
       apt:
         update_cache: yes
@@ -32,6 +25,7 @@
           - lvm2
           - gdisk
           - parted
+          - cron
         state: present
 
     - name: Configure NTP synchronization with chrony
@@ -39,6 +33,12 @@
         name: chrony
         enabled: yes
         state: started
+
+    - name: Check if Docker is already installed
+      command: docker --version
+      register: docker_installed
+      changed_when: false
+      failed_when: false
 
     - name: Install Docker
       block:
@@ -48,13 +48,13 @@
             state: directory
             mode: '0755'
 
-        - name: Add Docker GPG key (modern method)
+        - name: Add Docker GPG key
           shell: |
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           args:
             creates: /etc/apt/keyrings/docker.gpg
 
-        - name: Add Docker repository
+        - name: Add Docker repository for ARM64
           apt_repository:
             repo: "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
             state: present
@@ -88,8 +88,22 @@
             name: "{{ ansible_user }}"
             groups: docker
             append: yes
+      when: docker_installed.rc != 0
 
-    - name: Install Ceph repository
+- name: Install Ceph
+  become: true
+  hosts: all
+  vars:
+    ceph_release: reef
+  tasks:
+    - name: Check if Ceph packages are already installed
+      package:
+        name: cephadm
+        state: present
+      register: cephadm_installed
+      check_mode: yes
+
+    - name: Install Ceph repository and packages
       block:
         - name: Create keyring directory for Ceph
           file:
@@ -108,16 +122,17 @@
             repo: "deb [signed-by=/etc/apt/keyrings/ceph.gpg] https://download.ceph.com/debian-{{ ceph_release }}/ jammy main"
             state: present
 
-    - name: Update package cache after adding Ceph repo
-      apt:
-        update_cache: yes
+        - name: Update package cache after adding Ceph repo
+          apt:
+            update_cache: yes
 
-    - name: Install Ceph packages including cephadm
-      apt:
-        name:
-          - cephadm
-          - ceph-common
-        state: present
+        - name: Install Ceph packages
+          apt:
+            name:
+              - cephadm
+              - ceph-common
+            state: present
+      when: cephadm_installed.changed
 
     - name: Create ceph directories
       file:
@@ -131,139 +146,29 @@
         - /var/lib/ceph
         - /var/log/ceph
 
-- name: Prepare NVMe disk for Ceph OSDs
+- name: Bootstrap Ceph cluster (run only on bootstrap master)
   become: true
-  hosts: bootstrapMaster,otherHosts
-  tasks:
-    - name: Skip disk preparation if requested
-      debug:
-        msg: "Skipping disk preparation as skip_disk_preparation is set to true"
-      when: skip_disk_preparation | bool
-
-    - name: Check if NVMe device exists
-      stat:
-        path: "{{ nvme_device }}"
-      register: nvme_exists
-      when: not (skip_disk_preparation | bool)
-
-    - name: Fail if NVMe device not found
-      fail:
-        msg: "NVMe device {{ nvme_device }} not found on {{ inventory_hostname }}"
-      when: 
-        - not (skip_disk_preparation | bool)
-        - not nvme_exists.stat.exists
-
-    - name: Get NVMe device information
-      command: "lsblk {{ nvme_device }} -J"
-      register: nvme_info
-      changed_when: false
-      when: not (skip_disk_preparation | bool)
-
-    - name: Display NVMe device information
-      debug:
-        msg: |
-          NVMe Device: {{ nvme_device }}
-          Device Info: {{ nvme_info.stdout | from_json }}
-      when: not (skip_disk_preparation | bool)
-
-    - name: Check if device is already used by Ceph
-      command: "ceph-volume lvm list {{ nvme_device }}"
-      register: ceph_volume_check
-      failed_when: false
-      changed_when: false
-      when: not (skip_disk_preparation | bool)
-
-    - name: Check for existing partitions
-      command: "lsblk {{ nvme_device }} -n -o NAME"
-      register: nvme_partitions
-      changed_when: false
-      when: not (skip_disk_preparation | bool)
-
-    - name: Display current partitions
-      debug:
-        msg: "Current partitions on {{ nvme_device }}: {{ nvme_partitions.stdout_lines }}"
-      when: not (skip_disk_preparation | bool)
-
-    - name: Safety check - prevent accidental wipe of system disk
-      fail:
-        msg: |
-          SAFETY CHECK FAILED: {{ nvme_device }} appears to contain mounted filesystems.
-          Mounted partitions: {{ ansible_mounts | selectattr('device', 'match', nvme_device + '.*') | map(attribute='device') | list }}
-          Set force_disk_wipe=true to override this safety check.
-      when: 
-        - not (skip_disk_preparation | bool)
-        - not (force_disk_wipe | bool)
-        - (ansible_mounts | selectattr('device', 'match', nvme_device + '.*') | list | length > 0)
-
-    - name: Warn about data destruction
-      debug:
-        msg: |
-          WARNING: About to prepare {{ nvme_device }} for Ceph OSD usage.
-          This will DESTROY ALL DATA on the device!
-          Current partitions: {{ nvme_partitions.stdout_lines }}
-          Force wipe enabled: {{ force_disk_wipe | bool }}
-      when: not (skip_disk_preparation | bool)
-
-    - name: Unmount any mounted partitions on NVMe device
-      mount:
-        path: "{{ item }}"
-        state: unmounted
-      loop: "{{ ansible_mounts | selectattr('device', 'match', nvme_device + '.*') | map(attribute='mount') | list }}"
-      ignore_errors: yes
-      when: 
-        - not (skip_disk_preparation | bool)
-        - (force_disk_wipe | bool) or (ansible_mounts | selectattr('device', 'match', nvme_device + '.*') | list | length == 0)
-
-    - name: Wipe filesystem signatures from NVMe device
-      command: "wipefs -af {{ nvme_device }}"
-      when: 
-        - not (skip_disk_preparation | bool)
-        - nvme_partitions.stdout_lines | length > 1  # More than just the device itself
-
-    - name: Remove any existing LVM physical volumes
-      command: "pvremove -ff {{ nvme_device }}"
-      failed_when: false
-      when: 
-        - not (skip_disk_preparation | bool)
-        - nvme_partitions.stdout_lines | length > 1
-
-    - name: Zero out the beginning of the device
-      command: "dd if=/dev/zero of={{ nvme_device }} bs=1M count=100"
-      when: 
-        - not (skip_disk_preparation | bool)
-        - nvme_partitions.stdout_lines | length > 1
-
-    - name: Create GPT partition table
-      command: "sgdisk --zap-all {{ nvme_device }}"
-      when: not (skip_disk_preparation | bool)
-
-    - name: Wait for device to settle
-      pause:
-        seconds: 3
-      when: not (skip_disk_preparation | bool)
-
-    - name: Prepare device for Ceph OSD using ceph-volume
-      command: "ceph-volume lvm prepare --data {{ nvme_device }}"
-      register: ceph_volume_prepare
-      when: 
-        - not (skip_disk_preparation | bool)
-        - ceph_volume_check.rc != 0  # Only if not already prepared
-
-    - name: Display ceph-volume prepare output
-      debug:
-        var: ceph_volume_prepare.stdout_lines
-      when: 
-        - ceph_volume_prepare is defined 
-        - ceph_volume_prepare.stdout_lines is defined
-
-- name: Bootstrap Ceph cluster (run only on first host)
-  become: true
-  hosts: bootstrapMaster[0]
+  hosts: bootstrapMaster
   tasks:
     - name: Check if Ceph cluster is already bootstrapped
       stat:
         path: /etc/ceph/ceph.conf
       register: ceph_conf
+
+    - name: Check if cephadm is available for cluster operations
+      command: cephadm shell -- ceph status
+      register: ceph_status_check
+      changed_when: false
+      failed_when: false
+      when: ceph_conf.stat.exists
+
+    - name: Set cluster status fact
+      set_fact:
+        cluster_operational: "{{ ceph_conf.stat.exists and (ceph_status_check is defined) and (ceph_status_check.rc == 0) }}"
+
+    - name: Display cluster status
+      debug:
+        msg: "Cluster already operational: {{ cluster_operational }}"
 
     - name: Bootstrap Ceph cluster
       command: >
@@ -272,7 +177,8 @@
         --initial-dashboard-user admin
         --initial-dashboard-password admin123
         --allow-fqdn-hostname
-      when: not ceph_conf.stat.exists
+        --skip-firewalld
+      when: not cluster_operational
       register: bootstrap_result
 
     - name: Display bootstrap output
@@ -281,111 +187,298 @@
       when: bootstrap_result is defined and bootstrap_result.stdout_lines is defined
 
     - name: Wait for Ceph cluster to be ready
-      command: ceph status
+      command: cephadm shell -- ceph status
       register: ceph_status
       until: ceph_status.rc == 0
       retries: 30
       delay: 10
-      when: not ceph_conf.stat.exists
+      when: bootstrap_result is defined and bootstrap_result.changed
 
-    - name: Get Ceph public key
-      command: ceph cephadm get-pub-key
-      register: ceph_pub_key
-      when: not ceph_conf.stat.exists
+    - name: Update cluster operational status after bootstrap
+      set_fact:
+        cluster_operational: true
+      when: bootstrap_result is defined and bootstrap_result.changed
 
-    - name: Copy Ceph public key to other hosts
-      authorized_key:
-        user: root
-        key: "{{ ceph_pub_key.stdout }}"
-      delegate_to: "{{ item }}"
-      loop: "{{ groups['otherHosts'] }}"
-      when: not ceph_conf.stat.exists and item != inventory_hostname
+    - name: Get Ceph public key for SSH distribution
+      command: cephadm shell -- ceph cephadm get-pub-key
+      register: ceph_pub_key_result
+      when: cluster_operational
+      changed_when: false
+      ignore_errors: true
 
-- name: Add hosts to Ceph cluster
+    - name: Set public key fact
+      set_fact:
+        cluster_pub_key: "{{ ceph_pub_key_result.stdout if (ceph_pub_key_result is defined and ceph_pub_key_result.rc == 0 and ceph_pub_key_result.stdout is defined) else '' }}"
+      when: cluster_operational
+
+    - name: Debug public key status
+      debug:
+        msg: "Public key obtained: {{ 'Yes' if (cluster_pub_key is defined and cluster_pub_key != '') else 'No' }}"
+- name: Distribute SSH keys and add hosts to cluster
   become: true
   hosts: otherHosts
   tasks:
-    - name: Check if host is already in cluster
-      command: ceph orch host ls --format json
+    - name: Get cluster public key from bootstrap master
+      command: cephadm shell -- ceph cephadm get-pub-key
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      register: master_pub_key
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check if SSH key is already authorized
+      shell: |
+        if [ -f /root/.ssh/authorized_keys ]; then
+          grep -F "{{ master_pub_key.stdout }}" /root/.ssh/authorized_keys
+        else
+          exit 1
+        fi
+      register: ssh_key_check
+      changed_when: false
+      failed_when: false
+      when: 
+        - master_pub_key is defined
+        - master_pub_key.rc == 0
+        - master_pub_key.stdout is defined
+
+    - name: Add Ceph SSH key to authorized_keys
+      authorized_key:
+        user: root
+        key: "{{ master_pub_key.stdout }}"
+        state: present
+      when: 
+        - master_pub_key is defined
+        - master_pub_key.rc == 0
+        - master_pub_key.stdout is defined
+        - ssh_key_check.rc != 0
+
+    - name: Check if bootstrap master cluster is accessible
+      command: cephadm shell -- ceph status
+      delegate_to: "{{ groups['bootstrapMaster'][0] }}"
+      register: cluster_accessible
+      changed_when: false
+      failed_when: false
+
+    - name: Get current hosts in cluster
+      command: cephadm shell -- ceph orch host ls --format json
       delegate_to: "{{ groups['bootstrapMaster'][0] }}"
       register: host_list
       changed_when: false
+      failed_when: false
+      when: cluster_accessible.rc == 0
+
+    - name: Parse existing hosts
+      set_fact:
+        existing_hosts: "{{ (host_list.stdout | from_json | map(attribute='hostname') | list) if (host_list is defined and host_list.rc == 0 and host_list.stdout != '') else [] }}"
+
+    - name: Display current cluster hosts
+      debug:
+        msg: "Current hosts in cluster: {{ existing_hosts }}, checking for: {{ inventory_hostname }}"
+      when: existing_hosts is defined
 
     - name: Add host to Ceph cluster
       command: >
-        ceph orch host add {{ inventory_hostname }} {{ ansible_default_ipv4.address }}
+        cephadm shell -- ceph orch host add {{ inventory_hostname }} {{ ansible_default_ipv4.address }}
       delegate_to: "{{ groups['bootstrapMaster'][0] }}"
-      when: inventory_hostname not in (host_list.stdout | from_json | map(attribute='hostname') | list)
+      when: 
+        - cluster_accessible.rc == 0
+        - existing_hosts is defined
+        - inventory_hostname not in existing_hosts
+      register: host_add_result
+
+    - name: Display host addition result
+      debug:
+        msg: "Host {{ inventory_hostname }} added to cluster: {{ host_add_result.stdout_lines if host_add_result.stdout_lines is defined else 'Success' }}"
+      when: host_add_result is defined and host_add_result.changed
+
+    - name: Confirm host is already in cluster
+      debug:
+        msg: "Host {{ inventory_hostname }} is already in the cluster"
+      when: 
+        - existing_hosts is defined
+        - inventory_hostname in existing_hosts
 
 - name: Configure Ceph services
   become: true
-  hosts: bootstrapMaster[0]
+  hosts: bootstrapMaster
   tasks:
-    - name: Apply monitor placement
-      command: >
-        ceph orch apply mon --placement="{{ groups['otherHosts'] | join(',') }}"
+    - name: Verify cluster status before service configuration
+      command: cephadm shell -- ceph status
+      register: pre_config_status
+      changed_when: false
+      failed_when: false
 
-    - name: Apply manager placement
-      command: >
-        ceph orch apply mgr --placement="{{ groups['otherHosts'][:2] | join(',') }}"
+    - name: Ensure cluster is operational
+      fail:
+        msg: "Ceph cluster is not operational. Status check failed."
+      when: pre_config_status.rc != 0
 
-    - name: Check for available devices for OSDs
-      command: ceph orch device ls --format json
-      register: available_devices
-
-    - name: Display available devices
-      debug:
-        var: available_devices.stdout | from_json
-
-    - name: List prepared LVM volumes for Ceph
-      command: ceph-volume lvm list --format json
-      register: ceph_lvm_volumes
+    - name: Get all hosts in cluster
+      command: cephadm shell -- ceph orch host ls --format json
+      register: cluster_hosts_raw
       changed_when: false
 
-    - name: Display prepared LVM volumes
+    - name: Parse cluster hosts
+      set_fact:
+        current_cluster_hosts: "{{ (cluster_hosts_raw.stdout | from_json | map(attribute='hostname') | list) | sort if (cluster_hosts_raw.rc == 0 and cluster_hosts_raw.stdout != '') else [] }}"
+
+    - name: Display cluster hosts
       debug:
-        var: ceph_lvm_volumes.stdout | from_json
-      when: ceph_lvm_volumes.stdout != ""
+        msg: "Hosts available for service placement: {{ current_cluster_hosts }}"
 
-    - name: Activate prepared OSDs using ceph-volume
-      command: ceph-volume lvm activate --all
-      register: activate_result
-      when: ceph_lvm_volumes.stdout != ""
-
-    - name: Display activation results
-      debug:
-        var: activate_result.stdout_lines
-      when: activate_result is defined and activate_result.stdout_lines is defined
-
-    - name: Alternative - Create OSDs on available raw devices (if no LVM volumes prepared)
-      command: ceph orch daemon add osd {{ item.hostname }}:{{ item.path }}
-      loop: "{{ available_devices.stdout | from_json }}"
+    - name: Fail if no hosts in cluster
+      fail:
+        msg: "No hosts found in cluster"
       when: 
-        - item.available
-        - not item.rejected_reasons
-        - ceph_lvm_volumes.stdout == ""
-      ignore_errors: yes
+        - current_cluster_hosts | length == 0
+        - not ansible_check_mode
 
-    - name: Wait for OSDs to be created and up
-      command: ceph osd stat
-      register: osd_stat
-      until: "'up' in osd_stat.stdout"
-      retries: 30
-      delay: 10
-      ignore_errors: yes
+    # Monitor service configuration
+    - name: Get current monitor placement
+      command: cephadm shell -- ceph orch ls mon --format json
+      register: mon_placement_raw
+      changed_when: false
+      ignore_errors: true
 
-    - name: List all OSDs in the cluster
-      command: ceph osd tree
-      register: osd_tree
+    - name: Parse current monitor configuration
+      set_fact:
+        current_mon_config: "{{ (mon_placement_raw.stdout | from_json)[0] if (mon_placement_raw.rc == 0 and mon_placement_raw.stdout != '' and (mon_placement_raw.stdout | from_json | length > 0)) else {} }}"
 
-    - name: Display OSD tree
+    - name: Extract current monitor hosts
+      set_fact:
+        current_mon_hosts: "{{ (current_mon_config.placement.hosts | sort) if (current_mon_config.placement is defined and current_mon_config.placement.hosts is defined) else [] }}"
+
+    - name: Define target monitor hosts (all hosts)
+      set_fact:
+        target_mon_hosts: "{{ current_cluster_hosts }}"
+
+    - name: Check if monitor placement needs update
+      set_fact:
+        update_monitors: "{{ current_mon_hosts != target_mon_hosts and not ansible_check_mode }}"
+
+    - name: Display monitor placement comparison
       debug:
-        var: osd_tree.stdout_lines
+        msg:
+          - "Current monitor hosts: {{ current_mon_hosts }}"
+          - "Target monitor hosts: {{ target_mon_hosts }}"
+          - "Update needed: {{ update_monitors }}"
+
+    - name: Apply monitor placement to all hosts
+      command: >
+        cephadm shell -- ceph orch apply mon --placement="{{ target_mon_hosts | join(',') }}"
+      when: update_monitors
+      register: mon_apply_result
+
+    - name: Display monitor placement result
+      debug:
+        msg: "Monitor placement updated successfully"
+      when: mon_apply_result is defined and mon_apply_result.changed
+
+    # Manager service configuration
+    - name: Get current manager placement
+      command: cephadm shell -- ceph orch ls mgr --format json
+      register: mgr_placement_raw
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse current manager configuration
+      set_fact:
+        current_mgr_config: "{{ (mgr_placement_raw.stdout | from_json)[0] if (mgr_placement_raw.rc == 0 and mgr_placement_raw.stdout != '' and (mgr_placement_raw.stdout | from_json | length > 0)) else {} }}"
+
+    - name: Extract current manager hosts
+      set_fact:
+        current_mgr_hosts: "{{ (current_mgr_config.placement.hosts | sort) if (current_mgr_config.placement is defined and current_mgr_config.placement.hosts is defined) else [] }}"
+
+    - name: Define target manager hosts (first 3 hosts)
+      set_fact:
+        target_mgr_hosts: "{{ current_cluster_hosts[:3] }}"
+
+    - name: Check if manager placement needs update
+      set_fact:
+        update_managers: "{{ current_mgr_hosts != target_mgr_hosts and not ansible_check_mode }}"
+
+    - name: Display manager placement comparison
+      debug:
+        msg:
+          - "Current manager hosts: {{ current_mgr_hosts }}"
+          - "Target manager hosts: {{ target_mgr_hosts }}"
+          - "Update needed: {{ update_managers }}"
+
+    - name: Apply manager placement to first 3 hosts
+      command: >
+        cephadm shell -- ceph orch apply mgr --placement="{{ target_mgr_hosts | join(',') }}"
+      when: update_managers
+      register: mgr_apply_result
+
+    - name: Display manager placement result
+      debug:
+        msg: "Manager placement updated successfully"
+      when: mgr_apply_result is defined and mgr_apply_result.changed
+
+    # Wait for changes to propagate
+    - name: Wait for service changes to propagate
+      pause:
+        seconds: 30
+        prompt: "Waiting for service placement changes to take effect..."
+      when: 
+        - not ansible_check_mode
+        - (mon_apply_result is defined and mon_apply_result.changed) or (mgr_apply_result is defined and mgr_apply_result.changed)
+
+    # Final status and summary
+    - name: Get final cluster status
+      command: cephadm shell -- ceph status
+      register: final_status
+      changed_when: false
+      ignore_errors: true
 
     - name: Display final cluster status
-      command: ceph status
-      register: final_status
-
-    - name: Show cluster status
       debug:
         var: final_status.stdout_lines
+      when: final_status is defined and final_status.rc == 0
+
+    - name: Get cluster health details
+      command: cephadm shell -- ceph health detail
+      register: health_detail
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display health details if not healthy
+      debug:
+        var: health_detail.stdout_lines
+      when: 
+        - health_detail is defined 
+        - health_detail.rc == 0
+        - final_status is defined
+        - final_status.rc == 0
+        - "'HEALTH_OK' not in final_status.stdout"
+
+    - name: Display installation summary
+      debug:
+        msg:
+          - "=========================================="
+          - "     Ceph Cluster Installation Complete!"
+          - "=========================================="
+          - ""
+          - "Cluster Information:"
+          - "  Dashboard URL: https://{{ ansible_default_ipv4.address }}:8443"
+          - "  Username: admin"
+          - "  Password: admin123"
+          - ""
+          - "Cluster Configuration:"
+          - "  Total hosts: {{ current_cluster_hosts | length }}"
+          - "  Hosts: {{ current_cluster_hosts | join(', ') }}"
+          - "  Monitor hosts: {{ target_mon_hosts | join(', ') }}"
+          - "  Manager hosts: {{ target_mgr_hosts | join(', ') }}"
+          - ""
+          - "Service Updates Applied:"
+          - "  Monitors: {{ 'Updated' if (mon_apply_result is defined and mon_apply_result.changed) else 'No changes needed' }}"
+          - "  Managers: {{ 'Updated' if (mgr_apply_result is defined and mgr_apply_result.changed) else 'No changes needed' }}"
+          - ""
+          - "Next Steps:"
+          - "1. Add storage devices using ceph-volumes runbook"
+          - "2. Create pools and configure storage classes"
+          - "3. Configure authentication and users as needed"
+          - ""
+          - "To re-run this playbook:"
+          - "  ansible-playbook -i hosts.yaml install.yaml"
+          - "  (This playbook is idempotent and safe to re-run)"
+          - "=========================================="
