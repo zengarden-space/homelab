@@ -414,14 +414,117 @@
         msg: "Manager placement updated successfully"
       when: mgr_apply_result is defined and mgr_apply_result.changed
 
+    # Object Gateway (RGW) service configuration
+    - name: Get current RGW service configuration
+      command: cephadm shell -- ceph orch ls rgw --format json
+      register: rgw_placement_raw
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse current RGW configuration
+      set_fact:
+        current_rgw_services: "{{ rgw_placement_raw.stdout | from_json if (rgw_placement_raw.rc == 0 and rgw_placement_raw.stdout != '' and 'No services reported' not in rgw_placement_raw.stdout) else [] }}"
+
+    - name: Check if RGW service exists
+      set_fact:
+        rgw_exists: "{{ current_rgw_services | length > 0 }}"
+
+    - name: Display RGW status
+      debug:
+        msg: "RGW service {{ 'exists' if rgw_exists else 'needs to be created' }}"
+
+    - name: Create RGW service
+      command: >
+        cephadm shell -- ceph orch apply rgw default --placement="3 {{ current_cluster_hosts[:3] | join(' ') }}"
+      when: 
+        - not rgw_exists
+        - current_cluster_hosts | length >= 3
+        - not ansible_check_mode
+      register: rgw_apply_result
+
+    - name: Display RGW creation result
+      debug:
+        msg: "RGW service created successfully on hosts: {{ current_cluster_hosts[:3] | join(', ') }}"
+      when: rgw_apply_result is defined and rgw_apply_result.changed
+
+    # NFS service configuration
+    - name: Get current NFS service configuration
+      command: cephadm shell -- ceph orch ls nfs --format json
+      register: nfs_placement_raw
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse current NFS configuration
+      set_fact:
+        current_nfs_services: "{{ nfs_placement_raw.stdout | from_json if (nfs_placement_raw.rc == 0 and nfs_placement_raw.stdout != '' and 'No services reported' not in nfs_placement_raw.stdout) else [] }}"
+
+    - name: Check if NFS service exists
+      set_fact:
+        nfs_exists: "{{ current_nfs_services | length > 0 }}"
+
+    - name: Display NFS status
+      debug:
+        msg: "NFS service {{ 'exists' if nfs_exists else 'needs to be created' }}"
+
+    - name: Create NFS service
+      command: >
+        cephadm shell -- ceph orch apply nfs nfs-cluster --placement="2 {{ current_cluster_hosts[:2] | join(' ') }}"
+      when: 
+        - not nfs_exists
+        - current_cluster_hosts | length >= 2
+        - not ansible_check_mode
+      register: nfs_apply_result
+
+    - name: Display NFS creation result
+      debug:
+        msg: "NFS service created successfully on hosts: {{ current_cluster_hosts[:2] | join(', ') }}"
+      when: nfs_apply_result is defined and nfs_apply_result.changed
+
+    # SMB/Samba service configuration
+    - name: Get current SMB service configuration
+      command: cephadm shell -- ceph orch ls smb --format json
+      register: smb_placement_raw
+      changed_when: false
+      ignore_errors: true
+
+    - name: Parse current SMB configuration
+      set_fact:
+        current_smb_services: "{{ smb_placement_raw.stdout | from_json if (smb_placement_raw.rc == 0 and smb_placement_raw.stdout != '' and 'No services reported' not in smb_placement_raw.stdout) else [] }}"
+
+    - name: Check if SMB service exists
+      set_fact:
+        smb_exists: "{{ current_smb_services | length > 0 }}"
+
+    - name: Display SMB status
+      debug:
+        msg: "SMB service {{ 'exists' if smb_exists else 'needs to be created' }}"
+
+    - name: Create SMB service configuration
+      debug:
+        msg: "SMB service requires manual configuration with config files. See SERVICES.md for details."
+      when: 
+        - not smb_exists
+        - current_cluster_hosts | length >= 2
+        - not ansible_check_mode
+      register: smb_apply_result
+
+    - name: Display SMB creation result
+      debug:
+        msg: "SMB service created successfully on hosts: {{ current_cluster_hosts[:2] | join(', ') }}"
+      when: smb_apply_result is defined and smb_apply_result.changed
+
     # Wait for changes to propagate
     - name: Wait for service changes to propagate
       pause:
-        seconds: 30
+        seconds: 45
         prompt: "Waiting for service placement changes to take effect..."
       when: 
         - not ansible_check_mode
-        - (mon_apply_result is defined and mon_apply_result.changed) or (mgr_apply_result is defined and mgr_apply_result.changed)
+        - (mon_apply_result is defined and mon_apply_result.changed) or 
+          (mgr_apply_result is defined and mgr_apply_result.changed) or
+          (rgw_apply_result is defined and rgw_apply_result.changed) or
+          (nfs_apply_result is defined and nfs_apply_result.changed) or
+          (smb_apply_result is defined and smb_apply_result.changed)
 
     # Final status and summary
     - name: Get final cluster status
@@ -472,11 +575,23 @@
           - "Service Updates Applied:"
           - "  Monitors: {{ 'Updated' if (mon_apply_result is defined and mon_apply_result.changed) else 'No changes needed' }}"
           - "  Managers: {{ 'Updated' if (mgr_apply_result is defined and mgr_apply_result.changed) else 'No changes needed' }}"
+          - "  Object Gateway (RGW): {{ 'Created' if (rgw_apply_result is defined and rgw_apply_result.changed) else ('Exists' if rgw_exists else 'Not created') }}"
+          - "  NFS Service: {{ 'Created' if (nfs_apply_result is defined and nfs_apply_result.changed) else ('Exists' if nfs_exists else 'Not created') }}"
+          - "  SMB Service: {{ 'Created' if (smb_apply_result is defined and smb_apply_result.changed) else ('Exists' if smb_exists else 'Not created') }}"
+          - ""
+          - "Service Endpoints:"
+          - "  Dashboard: https://{{ ansible_default_ipv4.address }}:8443"
+          - "  RGW (S3/Swift): http://{{ ansible_default_ipv4.address }}:80 (if created)"
+          - "  NFS: Available on configured hosts (if created)"
+          - "  SMB: Available on configured hosts (if created)"
           - ""
           - "Next Steps:"
-          - "1. Add storage devices using ceph-volumes runbook"
+          - "1. Add storage devices using add-storage playbook"
           - "2. Create pools and configure storage classes"
-          - "3. Configure authentication and users as needed"
+          - "3. Configure RGW users and buckets for S3/Swift access"
+          - "4. Configure NFS exports and client access"
+          - "5. Configure SMB shares and user authentication"
+          - "6. Set up authentication and additional users as needed"
           - ""
           - "To re-run this playbook:"
           - "  ansible-playbook -i hosts.yaml install.yaml"

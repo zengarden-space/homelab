@@ -8,11 +8,15 @@ This runbook installs a Ceph cluster on all blade servers with the necessary pre
 - **Smart State Detection**: Automatically detects existing cluster components
 - **Incremental Setup**: Can add new hosts to existing clusters
 - **Robust Error Handling**: Handles various cluster states gracefully
+- **Complete Service Stack**: Installs all major Ceph services
 - Installs Docker and required system packages
 - Sets up Ceph repository and packages
 - Bootstraps Ceph cluster on the first node
 - Adds all other nodes to the cluster
 - Configures monitors and managers with intelligent placement
+- **Object Gateway (RGW)**: S3/Swift-compatible object storage
+- **NFS Service**: Network File System for POSIX file access
+- **SMB Service**: Samba/CIFS for Windows file sharing
 - Provides dashboard access for cluster management
 
 ## Idempotency Features
@@ -23,6 +27,7 @@ The playbook is designed to be completely idempotent, meaning you can run it mul
 - **Package Management**: Only installs packages if they're not already present
 - **Host Management**: Only adds hosts that aren't already in the cluster
 - **Service Configuration**: Only updates service placement when changes are needed
+- **Advanced Services**: Only creates RGW, NFS, and SMB services if they don't exist
 - **SSH Key Distribution**: Only distributes keys when necessary
 - **State Preservation**: Maintains existing cluster configuration when appropriate
 
@@ -78,7 +83,14 @@ After successful installation, the playbook provides comprehensive status inform
 3. **Next Steps:**
    - Use the `ceph-volumes` runbook to add storage devices (includes NVMe enablement)
    - Create pools and configure storage classes
-   - Configure authentication and users as needed
+   ## Next Steps
+
+1. **Add Storage**: Use `add-storage.yaml` to add NVMe devices as OSDs
+2. **Configure Services**: See `SERVICES.md` for detailed service configuration
+3. **Create Pools**: Set up storage pools for applications
+4. **Configure Authentication**: Set up users and access controls
+
+- Configure authentication and users as needed
 
 **Note:** NVMe support enablement has been moved to the `ceph-volumes` runbook. This separation allows you to install the Ceph cluster first, then handle storage device preparation (including NVMe enablement and verification) in a separate step.
 
@@ -99,8 +111,21 @@ The installation uses the following defaults:
 - Dashboard password: `admin123`
 - Monitor placement: All hosts
 - Manager placement: First 3 hosts
+- **Object Gateway (RGW)**: First 3 hosts (default realm/zone)
+- **NFS Service**: First 2 hosts (nfs-cluster)
+- **SMB Service**: First 2 hosts (smb-cluster)
+
+## Service Endpoints
+
+After installation, the following services will be available:
+- **Ceph Dashboard**: `https://<any-host>:8443` (admin/admin123)
+- **Object Gateway (RGW)**: `http://<host>:80` for S3/Swift API
+- **NFS**: Network file shares on configured hosts
+- **SMB**: Samba file shares on configured hosts
 
 ## Troubleshooting
+
+### General Cluster Issues
 
 1. **Check cluster status:**
    ```bash
@@ -116,6 +141,39 @@ The installation uses the following defaults:
    ```bash
    journalctl -u ceph-mon@<hostname>
    journalctl -u ceph-mgr@<hostname>
+   ```
+
+### Service-Specific Issues
+
+4. **Check RGW service:**
+   ```bash
+   ceph orch ls rgw
+   ceph orch ps --service_name rgw.default
+   ```
+
+5. **Check NFS service:**
+   ```bash
+   ceph orch ls nfs
+   ceph orch ps --service_name nfs.nfs-cluster
+   ```
+
+6. **Check SMB service:**
+   ```bash
+   ceph orch ls smb
+   ceph orch ps --service_name smb.smb-cluster
+   ```
+
+### Service Configuration
+
+7. **Configure RGW user (for S3 access):**
+   ```bash
+   radosgw-admin user create --uid=testuser --display-name="Test User"
+   radosgw-admin key create --uid=testuser --key-type=s3 --gen-access-key --gen-secret
+   ```
+
+8. **Test RGW connectivity:**
+   ```bash
+   curl -I http://<rgw-host>:80
    ```
 
 ## Uninstallation

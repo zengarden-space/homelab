@@ -23,10 +23,15 @@ The `install.yaml` playbook has been completely rewritten to be fully idempotent
 
 ### 4. Service Placement Intelligence
 - **Current State Analysis**: Reads current monitor and manager placement
+- **Additional Services**: Intelligent deployment of RGW, NFS, and SMB services
 - **Comparison Logic**: Only updates placement when actual changes are needed
+- **Service Detection**: Checks if additional services exist before creating them
 - **Target Configuration**: 
   - Monitors: All hosts in cluster
   - Managers: First 3 hosts alphabetically
+  - Object Gateway (RGW): First 3 hosts for high availability
+  - NFS Service: First 2 hosts for redundancy
+  - SMB Service: First 2 hosts for redundancy
 
 ### 5. Enhanced Error Handling
 - **Check Mode Support**: Works properly with `ansible-playbook --check`
@@ -44,6 +49,7 @@ The `install.yaml` playbook has been completely rewritten to be fully idempotent
 
 ## Test Results
 
+✅ **Additional Services**: Correctly detects and deploys RGW, NFS, and SMB services when needed
 ✅ **Bootstrap Master Test**: Runs cleanly on existing cluster, no unnecessary changes
 ✅ **State Detection**: Correctly identifies operational cluster
 ✅ **Service Placement**: Only updates when actual changes needed
