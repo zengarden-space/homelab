@@ -1,2 +1,2 @@
 source .env
-ansible-playbook -i hosts.yaml uninstall.yaml -K
+ansible-playbook -i hosts.yaml uninstall.yaml

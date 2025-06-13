@@ -1,0 +1,60 @@
+---
+- name: Setup SSH Keys for Seamless Access
+  hosts: all
+  gather_facts: yes
+  vars:
+    ssh_key_path: "{{ ansible_env.HOME }}/.ssh/id_rsa"
+    ssh_public_key_path: "{{ ansible_env.HOME }}/.ssh/id_rsa.pub"
+
+  tasks:
+    - name: Generate SSH key pair on each host (if not exists)
+      openssh_keypair:
+        path: "{{ ssh_key_path }}"
+        type: rsa
+        size: 4096
+        state: present
+        force: no
+      register: ssh_key_generated
+
+    - name: Read public key content
+      slurp:
+        src: "{{ ssh_public_key_path }}"
+      register: public_key_content
+
+    - name: Set public key fact
+      set_fact:
+        host_public_key: "{{ public_key_content.content | b64decode | trim }}"
+
+- name: Distribute SSH keys to all hosts
+  hosts: all
+  gather_facts: yes
+  vars:
+    target_hosts: "{{ groups['all'] }}"
+
+  tasks:
+    - name: Add all public keys to authorized_keys on all hosts
+      authorized_key:
+        user: "{{ ansible_user }}"
+        state: present
+        key: "{{ hostvars[item]['host_public_key'] }}"
+        comment: "{{ item }}"
+      loop: "{{ target_hosts }}"
+      when: item != inventory_hostname
+
+- name: Verify SSH connectivity
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Test SSH connectivity to all other hosts
+      command: ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no {{ item }} hostname
+      loop: "{{ groups['all'] }}"
+      when: item != inventory_hostname
+      register: ssh_test
+      changed_when: false
+      failed_when: false
+
+    - name: Report SSH test results
+      debug:
+        msg: "SSH to {{ item.item }}: {{ 'SUCCESS' if item.rc is defined and item.rc == 0 else 'FAILED' }}"
+      loop: "{{ ssh_test.results }}"
+      when: item.item is defined and not item.skipped | default(false)

@@ -1,12 +1,48 @@
+- name: Clean Rook/Ceph resources before uninstall
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Delete CephCluster if exists
+      shell: |-
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl delete cephcluster --all -n rook-ceph --timeout=60s || true
+        kubectl delete cephblockpool --all -n rook-ceph --timeout=30s || true
+        kubectl delete cephfilesystem --all -n rook-ceph --timeout=30s || true
+        kubectl delete cephobjectstore --all -n rook-ceph --timeout=30s || true
+      ignore_errors: true
+
+    - name: Delete Rook operator and CRDs
+      shell: |-
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl delete -n rook-ceph deployment rook-ceph-operator || true
+        kubectl delete namespace rook-ceph --timeout=120s || true
+        kubectl delete crd -l app.kubernetes.io/name=rook-ceph --timeout=60s || true
+      ignore_errors: true
+
+    - name: Clean Rook data directories on all nodes
+      shell: |-
+        sudo rm -rf /var/lib/rook || true
+        sudo umount /var/lib/rook || true
+      delegate_to: "{{ item }}"
+      loop:
+        - blade001
+        - blade002
+        - blade003
+        - blade004
+        - blade005
+      ignore_errors: true
+
 - name: Uninstall cilium
   become: true
   hosts: bootstrapMaster
   tasks:
     - name: Helm uninstall cilium
       shell: |-
-        export KUBECONFIG=/etc/rancher/k3s/config.yaml 
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml 
         helm uninstall cilium -n kube-system || true
-    - name: Clean iptables
+      ignore_errors: true
+
+    - name: Clean iptables on all nodes
       shell: |-
         # Delete Cilium rules from built-in chains
         sudo iptables -D FORWARD -j CILIUM_FORWARD || true
@@ -22,9 +58,28 @@
           done
         done
         
-        echo "Cilium iptables rules left:"
-        sudo iptables -S | grep CILIUM
-        sudo iptables -t nat -S | grep CILIUM
+        # Clean up any remaining backup rules
+        sudo iptables -D FORWARD -j CILIUM_FORWARD_old || true
+        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT_old || true
+        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST_old || true
+        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE_old || true
+        
+        # Reset all policies to ACCEPT to ensure no blocking rules remain
+        sudo iptables -P INPUT ACCEPT || true
+        sudo iptables -P FORWARD ACCEPT || true
+        sudo iptables -P OUTPUT ACCEPT || true
+        
+        echo "Remaining Cilium iptables rules:"
+        sudo iptables -S | grep CILIUM || echo "No Cilium rules found"
+        sudo iptables -t nat -S | grep CILIUM || echo "No Cilium NAT rules found"
+      delegate_to: "{{ item }}"
+      loop:
+        - blade001
+        - blade002
+        - blade003
+        - blade004
+        - blade005
+      ignore_errors: true
 
 
 - name: Uninstall k3s on workers
@@ -38,6 +93,7 @@
     - name: Uninstall k3s worker
       command: /usr/local/bin/k3s-agent-uninstall.sh
       when: k3s_uninstall_exists.stat.exists
+      ignore_errors: true
 
 - name: Uninstall k3s on servers
   become: true
@@ -50,6 +106,7 @@
     - name: Uninstall k3s server
       command: /usr/local/bin/k3s-uninstall.sh
       when: k3s_uninstall_exists.stat.exists
+      ignore_errors: true
 
 - name: Uninstall k3s on bootstrap servers
   become: true
@@ -62,3 +119,63 @@
     - name: Uninstall k3s server
       command: /usr/local/bin/k3s-uninstall.sh
       when: k3s_uninstall_exists.stat.exists
+      ignore_errors: true
+
+- name: Remove Ceph packages installed for troubleshooting
+  become: true
+  hosts: all
+  tasks:
+    - name: Remove Ceph packages
+      apt:
+        name:
+          - ceph-volume
+          - ceph-common
+          - ceph-base
+          - ceph-mon
+          - ceph-mgr
+          - ceph-osd
+          - ceph-mds
+          - radosgw
+          - librbd1
+          - librados2
+          - libcephfs2
+          - python3-rados
+          - python3-rbd
+          - python3-cephfs
+          - python3-rgw
+        state: absent
+        purge: yes
+        autoremove: yes
+      ignore_errors: true
+
+    - name: Clean apt cache
+      apt:
+        autoclean: yes
+        autoremove: yes
+      ignore_errors: true
+
+- name: Clean up remaining files and directories
+  become: true
+  hosts: all
+  tasks:
+    - name: Clean remaining k3s directories
+      shell: |-
+        sudo rm -rf /etc/rancher/k3s || true
+        sudo rm -rf /var/lib/rancher || true
+        sudo rm -rf /opt/cni || true
+        sudo rm -rf /var/lib/cni || true
+        sudo rm -rf /etc/cni || true
+        sudo systemctl reset-failed || true
+      ignore_errors: true
+
+    - name: Clean Docker/containerd state if present
+      shell: |-
+        sudo docker system prune -af || true
+        sudo crictl rmi --prune || true
+        sudo rm -rf /var/lib/containerd || true
+      ignore_errors: true
+
+    - name: Reboot nodes to ensure clean state
+      reboot:
+        reboot_timeout: 300
+      ignore_errors: true

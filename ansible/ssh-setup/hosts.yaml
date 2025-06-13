@@ -1,0 +1,15 @@
+all:
+  hosts:
+    blade001:
+      ansible_host: blade001
+    blade002:
+      ansible_host: blade002
+    blade003:
+      ansible_host: blade003
+    blade004:
+      ansible_host: blade004
+    blade005:
+      ansible_host: blade005
+  vars:
+    ansible_user: oleksiyp
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
