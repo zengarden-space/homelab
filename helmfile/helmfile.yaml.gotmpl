@@ -144,6 +144,43 @@ releases:
           networkPolicy:
             enabled: true
 
+  - name: ingress-nginx-external
+    namespace: external-tunnel
+    chart: ingress-nginx/ingress-nginx
+    values:
+      - controller:
+          ingressClassResource:
+            name: external
+            enabled: true
+            default: false
+            controllerValue: "k8s.io/ingress-nginx-external"
+          ingressClass: external
+          progressDeadlineSeconds: 10
+          networkPolicy:
+            enabled: true
+          service:
+            type: ClusterIP
+            loadBalancerIP: null
+          admissionWebhooks:
+            enabled: false
+
+  - name: cloudflare-tunnel
+    namespace: external-tunnel
+    chart: charts/cloudflare-tunnel
+    values:
+      - cloudflare:
+          account: {{ .Values.tunnel.cloudflareAccount | quote }}
+          tunnelId: {{ .Values.tunnel.cloudflareTunelId | quote }}
+          secret: {{ .Values.tunnel.cloudflareToken | quote }}
+        securityContext:
+          seccompProfile:
+            type: RuntimeDefault
+        ingress:
+          - service: http://ingress-nginx-external-controller.ingress-nginx-external.svc.cluster.local:80
+            hostname: "*.zengarden.space"
+          - service: http://ingress-nginx-external-controller.ingress-nginx-external.svc.cluster.local:80
+            hostname: "zengarden.space"
+
   - name: vm
     namespace: victoria-metrics
     chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
@@ -284,62 +321,45 @@ releases:
            username: gitea
            password: {{ .Values.gitea.password | quote }}
 
-  - name: minio
-    namespace: minio
-    chart: oci://registry-1.docker.io/bitnamicharts/minio
-    version: 16.0.10
-    values:
-      - mode: distributed
-        auth:
-          rootUser: admin
-          rootPassword: {{ .Values.minio.password | quote }}
-        ingress:
-          enabled: true
-          hostname: minio.zengarden.space
-          tls: true
-          annotations:
-            kubernetes.io/ingress.class: nginx
-            cert-manager.io/cluster-issuer: "letsencrypt-prod"
-
-  - name: velero
-    namespace: velero
-    chart: vmware-tanzu/velero
-    version: 7.0.0
-    values:
-      - configuration:
-          backupStorageLocation:
-          - name: default
-            bucket: blade-cluster-zengarden-space
-            default: true
-            provider: aws
-            credential:
-              name: test-credential
-              key: test-key
-            config:
-              region: eu-central-1
-              profile: eu-central-1-profile
-          volumeSnapshotLocation:
-          - name: blade-cluster-zengarden-space
-            provider: aws
-            config:
-              region: eu-central-1
-        initContainers:
-          - name: velero-plugin-for-aws
-            image: velero/velero-plugin-for-aws:v1.8.0
-            volumeMounts:
-              - mountPath: /target
-                name: plugins
-        credentials:
-          useSecret: true
-          secretContents:
-            cloud: |
-              [default]
-              aws_access_key_id = admin
-              aws_secret_access_key = {{ .Values.minio.password | quote }}
-        schedules:
-          all-namespaces-daily:
-            schedule: "0 0 * * *"
-            template:
-              ttl: "240h"
-              includedNamespaces:
-                - "*"
+#  - name: velero
+#    namespace: velero
+#    chart: vmware-tanzu/velero
+#    version: 7.0.0
+#    values:
+#      - configuration:
+#          backupStorageLocation:
+#          - name: default
+#            bucket: blade-cluster-zengarden-space
+#            default: true
+#            provider: aws
+#            credential:
+#              name: test-credential
+#              key: test-key
+#            config:
+#              region: eu-central-1
+#              profile: eu-central-1-profile
+#          volumeSnapshotLocation:
+#          - name: blade-cluster-zengarden-space
+#            provider: aws
+#            config:
+#              region: eu-central-1
+#        initContainers:
+#          - name: velero-plugin-for-aws
+#            image: velero/velero-plugin-for-aws:v1.8.0
+#            volumeMounts:
+#              - mountPath: /target
+#                name: plugins
+#        credentials:
+#          useSecret: true
+#          secretContents:
+#            cloud: |
+#              [default]
+#              aws_access_key_id = admin
+#              aws_secret_access_key = {{ .Values.minio.password | quote }}
+#        schedules:
+#          all-namespaces-daily:
+#            schedule: "0 0 * * *"
+#            template:
+#              ttl: "240h"
+#              includedNamespaces:
+#                - "*"

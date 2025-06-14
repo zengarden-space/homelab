@@ -121,39 +121,6 @@
       when: k3s_uninstall_exists.stat.exists
       ignore_errors: true
 
-- name: Remove Ceph packages installed for troubleshooting
-  become: true
-  hosts: all
-  tasks:
-    - name: Remove Ceph packages
-      apt:
-        name:
-          - ceph-volume
-          - ceph-common
-          - ceph-base
-          - ceph-mon
-          - ceph-mgr
-          - ceph-osd
-          - ceph-mds
-          - radosgw
-          - librbd1
-          - librados2
-          - libcephfs2
-          - python3-rados
-          - python3-rbd
-          - python3-cephfs
-          - python3-rgw
-        state: absent
-        purge: yes
-        autoremove: yes
-      ignore_errors: true
-
-    - name: Clean apt cache
-      apt:
-        autoclean: yes
-        autoremove: yes
-      ignore_errors: true
-
 - name: Clean up remaining files and directories
   become: true
   hosts: all
