@@ -4,22 +4,24 @@ This Helm chart deploys Gitea Action Runners with automatic token generation.
 
 ## Features
 
-- **Automatic Token Generation**: Uses a Kubernetes Job to automatically generate runner tokens
-- **RBAC Security**: Includes proper ServiceAccount, Role, and RoleBinding for secure operation
+- **Automatic Token Generation**: Uses kubectl exec to run `gitea actions generate-runner-token` inside a Gitea pod
+- **RBAC Security**: Includes proper ServiceAccount, Role, RoleBinding, ClusterRole, and ClusterRoleBinding for secure operation
 - **Configurable**: All major settings can be configured via values.yaml
 - **Image Pull Secrets**: Supports private registry authentication
 
 ## Components
 
 ### 1. Token Generator Job (`job.yaml`)
-- Runs as a Helm pre-install/pre-upgrade hook
-- Creates the `gitea-action-runner` secret with a generated token
-- Uses RBAC permissions to create/update secrets
+- Runs as a Kubernetes Job
+- Finds a running Gitea pod in the `gitea` namespace
+- Executes `gitea actions generate-runner-token` via kubectl exec
+- Creates the `gitea-action-runner` secret with the generated token
 
 ### 2. RBAC Resources (`rbac.yaml`)
 - ServiceAccount: `gitea-token-generator`
-- Role: Permissions to manage secrets in the gitea namespace
-- RoleBinding: Links the ServiceAccount to the Role
+- Role: Permissions to manage secrets in the current namespace
+- ClusterRole: Permissions to list pods and exec into pods in any namespace
+- RoleBinding and ClusterRoleBinding: Links the ServiceAccount to the respective roles
 
 ### 3. Runner StatefulSet (`statefulset.yaml`)
 - Runs multiple Gitea Action Runner instances
@@ -38,15 +40,12 @@ This Helm chart deploys Gitea Action Runners with automatic token generation.
 gitea:
   url: "https://gitea.zengarden.space"
   image: "docker.gitea.com/gitea:1.23.8-rootless"
-  database:
-    host: "gitea-postgresql-ha-pgpool.gitea.svc.cluster.local:5432"
-    name: "gitea"
-    user: "gitea"
-    password: "gitea"
 
 runner:
-  replicas: 4
+  replicas: 5
   image: "gitea/act_runner:0.2.11"
+
+imagePullSecrets: {}
 
 imagePullSecrets:
   - name: docker-hub

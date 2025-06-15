@@ -172,14 +172,18 @@ releases:
           account: {{ .Values.tunnel.cloudflareAccount | quote }}
           tunnelId: {{ .Values.tunnel.cloudflareTunelId | quote }}
           secret: {{ .Values.tunnel.cloudflareToken | quote }}
+          ingress:
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "zengarden.space"
+              originRequest:
+                  noTLSVerify: true
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "*.zengarden.space"
+              originRequest:
+                  noTLSVerify: true          
         securityContext:
           seccompProfile:
             type: RuntimeDefault
-        ingress:
-          - service: http://ingress-nginx-external-controller.ingress-nginx-external.svc.cluster.local:80
-            hostname: "*.zengarden.space"
-          - service: http://ingress-nginx-external-controller.ingress-nginx-external.svc.cluster.local:80
-            hostname: "zengarden.space"
 
   - name: vm
     namespace: victoria-metrics
@@ -220,6 +224,9 @@ releases:
 
         controller:
           replicas: 1
+
+        secret:
+          githubSecret: {{ .Values.argocd.webhookSecret }}
 
         server:
           autoscaling:
@@ -315,11 +322,6 @@ releases:
   - name: gitea-runner
     namespace: gitea-runner
     chart: charts/gitea-runner
-    values:
-     - gitea:
-         admin:
-           username: gitea
-           password: {{ .Values.gitea.password | quote }}
 
 #  - name: velero
 #    namespace: velero

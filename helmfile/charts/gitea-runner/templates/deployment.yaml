@@ -4,7 +4,6 @@ metadata:
   labels:
     app: gitea-action-runner-cache
   name: gitea-action-runner-cache
-  namespace: gitea
 spec:
   replicas: 1
   selector:

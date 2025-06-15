@@ -4,7 +4,6 @@ metadata:
   labels:
     app: gitea-action-runner
   name: gitea-action-runner
-  namespace: gitea
 spec:
   replicas: {{ .Values.runner.replicas | default 4 }}
   serviceName: gitea-action-runner
