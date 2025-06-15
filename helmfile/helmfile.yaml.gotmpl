@@ -23,6 +23,8 @@ repositories:
     url: https://releases.rancher.com/server-charts/latest
   - name: vmware-tanzu
     url: https://vmware-tanzu.github.io/helm-charts
+  - name: authelia
+    url: https://charts.authelia.com
 
 releases:
   - name: metallb
@@ -79,7 +81,20 @@ releases:
           - zengarden.space
         provider:
           name: webhook
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           webhook:
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              seccompProfile:
+                type: RuntimeDefault
             image:
               repository: "ghcr.io/mirceanton/external-dns-provider-mikrotik"
               tag: "v1.4.4@sha256:d51055ef8f9311373e0b16057b34dbbb393a8f29248431f4ddd9279a417f602d"
@@ -143,6 +158,86 @@ releases:
           progressDeadlineSeconds: 10
           networkPolicy:
             enabled: true
+
+  - name: authelia-config
+    namespace: authelia
+    chart: ./charts/authelia-config
+
+  - name: authelia
+    namespace: authelia
+    chart: authelia/authelia
+    version: 0.9.3
+    needs:
+      - authelia-config
+      - ingress-nginx/ingress-nginx
+    values:
+      - ingress:
+          enabled: true
+          annotations:
+            kubernetes.io/ingress.class: nginx
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          tls:
+            enabled: true
+            secret: authelia-tls
+          rulesOverride:
+            - host: auth.{{ .Values.authelia.domain }}
+              path: /
+        configMap:
+          session:
+            cookies:
+              - domain: {{ .Values.authelia.domain | quote }}
+                default_redirection_url: https://www.{{ .Values.authelia.domain }}
+            redis:
+              enabled: true
+              deploy: true
+              host: authelia-redis-headless
+          authentication_backend:
+            password_reset:
+              disable: true
+            password_change:
+              disable: true
+            file:
+              enabled: true
+              path: /secrets/authelia-users/users_database.yml
+          storage:
+            postgres:
+              enabled: true
+              deploy: true
+              address: 'tcp://authelia-postgresql:5432'
+              password:
+                value: authelia
+          notifier:
+            disable_startup_check: true
+            smtp:
+              enabled: true
+              address: smtp://smtp.gmail.com:587
+              sender: Authelia <noreply@{{ .Values.authelia.domain }}>
+              username: your-email@gmail.com
+        secret:
+          additionalSecrets:
+            authelia-users:
+              items:
+                - key: users_database.yml
+                  path: users_database.yml
+        pod:
+          kind: Deployment
+          strategy:
+            type: Recreate
+          securityContext:
+            container:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
+              fsGroup: 1000
+              seccompProfile:
+                type: RuntimeDefault
+            pod:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+        persistence:
+          enabled: false
 
   - name: ingress-nginx-external
     namespace: external-tunnel
@@ -306,12 +401,12 @@ releases:
         global:
           imagePullSecrets:
             - docker-hub
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 0
+            maxUnavailable: 1
         deployment:
-          strategy:
-            type: RollingUpdate
-            rollingUpdate:
-              maxSurge: 0
-              maxUnavailable: 1
           env:
             - name: GITEA__ACTIONS__ENABLED
               value: "true"
