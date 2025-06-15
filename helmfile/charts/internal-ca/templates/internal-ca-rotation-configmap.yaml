@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rotation-job
+data:
+  rotate.sh: |-
+    {{ .Files.Get "files/rotate.sh" | nindent 4 }}

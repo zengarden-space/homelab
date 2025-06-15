@@ -43,10 +43,31 @@ releases:
   - name: cert-manager
     namespace: cert-manager
     chart: jetstack/cert-manager
-    version: v1.14.5
+    version: v1.16.0
     values:
       - installCRDs: true
 
+  - name: trust-manager
+    namespace: cert-manager
+    chart: jetstack/trust-manager
+    version: v0.12.0
+    wait: true
+    values:
+      - app:
+          trust:
+            namespace: cert-manager
+        secretTargets:
+          enabled: true
+          authorizedSecrets: ["internal-ca-bundle"]
+    needs:
+      - cert-manager
+
+  - name: internal-ca
+    namespace: cert-manager
+    chart: charts/internal-ca
+    needs:
+      - trust-manager
+      
   - name: letsencrypt-prod
     namespace: cert-manager
     chart: charts/letsencrypt-prod
@@ -158,6 +179,8 @@ releases:
           progressDeadlineSeconds: 10
           networkPolicy:
             enabled: true
+        tcp:
+          "22": "gitea/gitea-ssh:22"
 
   - name: authelia-config
     namespace: authelia
@@ -169,7 +192,6 @@ releases:
     version: 0.9.3
     needs:
       - authelia-config
-      - ingress-nginx/ingress-nginx
     values:
       - ingress:
           enabled: true
@@ -253,9 +275,6 @@ releases:
           progressDeadlineSeconds: 10
           networkPolicy:
             enabled: true
-          service:
-            type: ClusterIP
-            loadBalancerIP: null
           admissionWebhooks:
             enabled: false
 

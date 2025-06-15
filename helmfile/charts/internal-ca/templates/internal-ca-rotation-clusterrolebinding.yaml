@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rotation-job
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rotation-job
+subjects:
+  - kind: ServiceAccount
+    name: rotation-job
+    namespace: {{ .Release.Namespace }}

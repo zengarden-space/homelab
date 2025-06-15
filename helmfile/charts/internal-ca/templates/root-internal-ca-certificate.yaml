@@ -1,0 +1,16 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ca-root
+spec:
+  secretName: ca-root-tls
+  isCA: true
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  duration: 2000h
+  renewBefore: 1000h
+  commonName: Root internal CA certificate
+  issuerRef:
+    name: ca-root

@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rotation-job
+spec:
+  template:
+    spec:
+      serviceAccountName: rotation-job
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rotation
+          image: bitnami/kubectl:1.33.1
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - bash
+            - /tmp/code/rotate.sh
+          workingDir: /tmp
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+            - mountPath: /tmp/code
+              name: code
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Ki
+        - name: code
+          configMap:
+            name: rotation-job
+      restartPolicy: OnFailure
