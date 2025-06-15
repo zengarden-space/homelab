@@ -307,9 +307,16 @@ releases:
           imagePullSecrets:
             - docker-hub
         deployment:
+          strategy:
+            type: RollingUpdate
+            rollingUpdate:
+              maxSurge: 0
+              maxUnavailable: 1
           env:
             - name: GITEA__ACTIONS__ENABLED
               value: "true"
+            - name: GITEA__WEBHOOK_ALLOWED_HOST_LIST
+              value: "*"
         postgresql-ha:
           service:
             ports:
