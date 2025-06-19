@@ -318,24 +318,26 @@
 - name: Prepare Ceph storage devices on all nodes (partitioned)
   become: true
   hosts: [bootstrapMaster, masters, workers]
+  vars:
+    ceph_partition: "/dev/nvme0n1p3"
   tasks:
     - name: Check NVMe Ceph partition exists
       stat:
-        path: /dev/nvme0n1p2
+        path: "{{ ceph_partition }}"
       register: nvme_ceph_partition
 
     - name: Fail if Ceph partition not found
       fail:
-        msg: "Ceph partition /dev/nvme0n1p2 not found. Run nvme-partitioning playbook first."
+        msg: "Ceph partition {{ ceph_partition }} not found. Run nvme-partitioning playbook first."
       when: not nvme_ceph_partition.stat.exists
 
     - name: Verify Ceph partition is clean
       shell: |
         echo "=== Ceph partition status ==="
-        lsblk /dev/nvme0n1p2
+        lsblk {{ ceph_partition }}
         echo ""
         echo "=== Filesystem check ==="
-        blkid /dev/nvme0n1p2 || echo "No filesystem detected (good for Ceph)"
+        blkid {{ ceph_partition }} || echo "No filesystem detected (good for Ceph)"
       register: partition_status
 
     - name: Show partition status
@@ -350,7 +352,6 @@
       shell: |-
         set -euxo pipefail
         export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        
         cat <<EOF | kubectl apply -f -
         apiVersion: ceph.rook.io/v1
         kind: CephCluster
@@ -359,7 +360,7 @@
           namespace: rook-ceph
         spec:
           cephVersion:
-            image: quay.io/ceph/ceph:v18.2.0
+            image: quay.io/ceph/ceph:v19.2.2
           dataDirHostPath: /var/lib/rook
           skipUpgradeChecks: false
           continueUpgradeAfterChecksEvenIfNotHealthy: false
@@ -430,27 +431,27 @@
             nodes:
             - name: "blade001"
               devices:
-              - name: "/dev/nvme0n1p2"
+              - name: "{{ ceph_partition }}"
                 config:
                   osdsPerDevice: "1"
             - name: "blade002" 
               devices:
-              - name: "/dev/nvme0n1p2"
+              - name: "{{ ceph_partition }}"
                 config:
                   osdsPerDevice: "1"
             - name: "blade003"
               devices:
-              - name: "/dev/nvme0n1p2"
+              - name: "{{ ceph_partition }}"
                 config:
                   osdsPerDevice: "1"
             - name: "blade004"
               devices:
-              - name: "/dev/nvme0n1p2"
+              - name: "{{ ceph_partition }}"
                 config:
                   osdsPerDevice: "1"
             - name: "blade005"
               devices:
-              - name: "/dev/nvme0n1p2"
+              - name: "{{ ceph_partition }}"
                 config:
                   osdsPerDevice: "1"
           disruptionManagement:

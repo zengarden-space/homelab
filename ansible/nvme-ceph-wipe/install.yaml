@@ -4,24 +4,68 @@
   hosts: masters
   vars:
     nvme_device: "/dev/nvme0n1"
-    ceph_partition: "{{ nvme_device }}p2"
+    ceph_partition: "{{ nvme_device }}p3"
     
   tasks:
-    - name: Ping hosts
-      ping:
+- name: Ping hosts
+  ping:
 
-    - name: Mask Ceph and related services
-      systemd:
-        name: "{{ item }}"
-        masked: yes
-      loop:
-        - ceph-osd
-        - rbdmap
-        - ceph-crash
-        - nvmf-autoconnect
-        - nvmefc-boot-connections
-        - smartmontools
-      ignore_errors: yes
+- name: Clean /var/lib/rook content (preserve lost+found)
+  shell: |
+    if [ -d "/var/lib/rook" ]; then
+      echo "=== Cleaning /var/lib/rook content ==="
+      cd /var/lib/rook
+      
+      # Remove all files and directories except lost+found
+      find . -mindepth 1 -maxdepth 1 ! -name 'lost+found' -exec rm -rf {} + 2>/dev/null || true
+      
+      echo "Cleaned /var/lib/rook (preserved lost+found if it exists)"
+      echo "Remaining content:"
+      ls -la /var/lib/rook
+    else
+      echo "/var/lib/rook directory does not exist, skipping cleanup"
+    fi
+  ignore_errors: yes
+
+- name: Execute Ceph wipe sequence
+  shell: |
+    set -euo pipefail
+    
+    echo "=== Masking Ceph and related services ==="
+    sudo systemctl mask ceph-osd || true
+    sudo systemctl mask rbdmap || true
+    sudo systemctl mask ceph-crash || true
+    sudo systemctl mask nvmf-autoconnect || true
+    sudo systemctl mask nvmefc-boot-connections || true
+    sudo systemctl mask smartmontools || true
+    
+    echo "=== Installing ceph-osd package ==="
+    sudo apt update
+    sudo apt install -y ceph-osd
+    
+    echo "=== Checking Ceph partition {{ ceph_partition }} ==="
+    if [ -b "{{ ceph_partition }}" ]; then
+      echo "Found Ceph partition {{ ceph_partition }}, proceeding with zap"
+      sudo ceph-volume lvm zap {{ ceph_partition }}
+      echo "Zap operation completed"
+    else
+      echo "Ceph partition {{ ceph_partition }} not found, skipping zap operation"
+    fi
+    
+    echo "=== Removing ceph-osd package ==="
+    sudo apt remove -y ceph-osd
+    sudo apt autoremove -y
+    
+    echo "=== Unmasking services ==="
+    sudo systemctl unmask ceph-osd || true
+    sudo systemctl unmask rbdmap || true
+    sudo systemctl unmask ceph-crash || true
+    sudo systemctl unmask nvmf-autoconnect || true
+    sudo systemctl unmask nvmefc-boot-connections || true
+    sudo systemctl unmask smartmontools || true
+    
+    echo "=== Ceph wipe sequence completed ==="
+  register: ceph_wipe_result
 
     - name: Update apt cache
       apt:

@@ -5,8 +5,10 @@
   vars:
     nvme_device: "/dev/nvme0n1"
     etcd_partition_size: "30GiB"
+    rook_partition_size: "20GiB"
     ceph_partition_size: "100%FREE"
     etcd_mount_point: "/var/lib/rancher/k3s"
+    rook_mount_point: "/var/lib/rook"
     
   tasks:
     - name: Ping hosts
@@ -18,11 +20,27 @@
         state: stopped
       ignore_errors: yes
 
-    - name: Unmount any existing etcd directory
+    - name: Unmount any existing mount points
       mount:
-        path: "{{ etcd_mount_point }}"
+        path: "{{ item }}"
         state: unmounted
       ignore_errors: yes
+      loop:
+        - "{{ etcd_mount_point }}"
+        - "{{ rook_mount_point }}"
+
+    - name: Clean mount point directories (remove any files if not mounted)
+      shell: |
+        # Check if directory exists and is not a mount point, then clean it
+        if [ -d "{{ item }}" ] && ! mountpoint -q "{{ item }}"; then
+          echo "Cleaning directory: {{ item }}"
+          rm -rf "{{ item }}"/*
+          rm -rf "{{ item }}"/.*
+        fi
+      ignore_errors: yes
+      loop:
+        - "{{ etcd_mount_point }}"
+        - "{{ rook_mount_point }}"
 
     - name: Remove any existing Ceph LVM volumes
       shell: |
@@ -63,15 +81,22 @@
         # Create GPT partition table
         parted -s {{ nvme_device }} mklabel gpt
         
-        # Create etcd partition (10GiB)
+        # Create etcd partition ({{etcd_partition_size}})
         parted -s {{ nvme_device }} mkpart etcd ext4 1MiB {{ etcd_partition_size }}
         
+        # Calculate rook partition end (etcd_size + rook_size)
+        rook_end=$(( 30 + 20 ))GiB
+        
+        # Create rook partition ({{rook_partition_size}})  
+        parted -s {{ nvme_device }} mkpart rook ext4 {{ etcd_partition_size }} ${rook_end}
+        
         # Create Ceph partition (remaining space)
-        parted -s {{ nvme_device }} mkpart ceph ext4 {{ etcd_partition_size }} 100%
+        parted -s {{ nvme_device }} mkpart ceph ext4 ${rook_end} 100%
         
         # Set partition names
         parted -s {{ nvme_device }} name 1 etcd
-        parted -s {{ nvme_device }} name 2 ceph
+        parted -s {{ nvme_device }} name 2 rook
+        parted -s {{ nvme_device }} name 3 ceph
         
         # Inform kernel of changes
         partprobe {{ nvme_device }}
@@ -87,16 +112,33 @@
         dev: "{{ nvme_device }}p1"
         opts: "-L etcd-data"
 
-    - name: Create etcd mount point directory
+    - name: Format rook partition with ext4
+      filesystem:
+        fstype: ext4
+        dev: "{{ nvme_device }}p2"
+        opts: "-L rook-data"
+
+    - name: Create mount point directories
       file:
-        path: "{{ etcd_mount_point }}"
+        path: "{{ item }}"
         state: directory
         mode: '0755'
+      loop:
+        - "{{ etcd_mount_point }}"
+        - "{{ rook_mount_point }}"
 
     - name: Mount etcd partition
       mount:
         path: "{{ etcd_mount_point }}"
         src: "{{ nvme_device }}p1"
+        fstype: ext4
+        opts: defaults,noatime
+        state: mounted
+
+    - name: Mount rook partition
+      mount:
+        path: "{{ rook_mount_point }}"
+        src: "{{ nvme_device }}p2"
         fstype: ext4
         opts: defaults,noatime
         state: mounted
@@ -109,12 +151,23 @@
         opts: defaults,noatime
         state: present
 
-    - name: Set correct ownership for K3s directory
+    - name: Add rook partition to fstab
+      mount:
+        path: "{{ rook_mount_point }}"
+        src: "{{ nvme_device }}p2"
+        fstype: ext4
+        opts: defaults,noatime
+        state: present
+
+    - name: Set correct ownership for mount directories
       file:
-        path: "{{ etcd_mount_point }}"
+        path: "{{ item }}"
         owner: root
         group: root
         mode: '0755'
+      loop:
+        - "{{ etcd_mount_point }}"
+        - "{{ rook_mount_point }}"
 
     - name: Display partition information
       shell: |
@@ -122,10 +175,10 @@
         lsblk {{ nvme_device }}
         echo ""
         echo "=== Filesystem information ==="
-        df -h {{ etcd_mount_point }}
+        df -h {{ etcd_mount_point }} {{ rook_mount_point }}
         echo ""
         echo "=== Available space for Ceph ==="
-        lsblk {{ nvme_device }}p2
+        lsblk {{ nvme_device }}p3
       register: partition_info
 
     - name: Show partition results
