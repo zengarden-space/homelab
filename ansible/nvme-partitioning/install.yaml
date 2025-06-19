@@ -4,8 +4,9 @@
   hosts: masters
   vars:
     nvme_device: "/dev/nvme0n1"
-    etcd_partition_size: "30GiB"
+    etcd_partition_size: "20GiB"
     rook_partition_size: "20GiB"
+    rook_partition_end: "40GiB"
     ceph_partition_size: "100%FREE"
     etcd_mount_point: "/var/lib/rancher/k3s"
     rook_mount_point: "/var/lib/rook"
@@ -85,18 +86,18 @@
         parted -s {{ nvme_device }} mkpart etcd ext4 1MiB {{ etcd_partition_size }}
         
         # Calculate rook partition end (etcd_size + rook_size)
-        rook_end=$(( 30 + 20 ))GiB
+        rook_end={{ rook_partition_end }}
         
         # Create rook partition ({{rook_partition_size}})  
         parted -s {{ nvme_device }} mkpart rook ext4 {{ etcd_partition_size }} ${rook_end}
         
         # Create Ceph partition (remaining space)
-        parted -s {{ nvme_device }} mkpart ceph ext4 ${rook_end} 100%
+        parted -s {{ nvme_device }} mkpart notset ext4 ${rook_end} 100%
         
         # Set partition names
         parted -s {{ nvme_device }} name 1 etcd
         parted -s {{ nvme_device }} name 2 rook
-        parted -s {{ nvme_device }} name 3 ceph
+        parted -s {{ nvme_device }} name 3 notset
         
         # Inform kernel of changes
         partprobe {{ nvme_device }}

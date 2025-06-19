@@ -65,13 +65,13 @@
         fi
       ignore_errors: yes
 
-    - name: Zap Ceph partition with ceph-volume
-      command: ceph-volume lvm zap {{ ceph_partition }}
+    - name: Destroy Ceph partition with ceph-volume
+      command: ceph-volume lvm zap {{ ceph_partition }} --destroy
       register: zap_result
       when: ceph_partition_stat.stat.exists
 
-    - name: Remove PARTLABEL from Ceph partition (GPT)
-      command: parted {{ nvme_device }} -s name 2 "notset"
+    - name: Create partition again
+      command: parted {{ nvme_device }} -s mkpart notset 50GiB 100%
       register: partlabel_removal
       when: ceph_partition_stat.stat.exists
 
@@ -86,27 +86,27 @@
         msg: "{{ partition_info_after.stdout_lines }}"
       when: ceph_partition_stat.stat.exists and partition_info_after is defined
 
-    - name: Remove ceph-osd package
-      apt:
-        name: ceph-osd
-        state: absent
+    # - name: Remove ceph-osd package
+    #   apt:
+    #     name: ceph-osd
+    #     state: absent
 
-    - name: Run apt autoremove
-      apt:
-        autoremove: yes
+    # - name: Run apt autoremove
+    #   apt:
+    #     autoremove: yes
 
-    - name: Unmask Ceph and related services
-      systemd:
-        name: "{{ item }}"
-        masked: no
-      loop:
-        - ceph-osd
-        - rbdmap
-        - ceph-crash
-        - nvmf-autoconnect
-        - nvmefc-boot-connections
-        - smartmontools
-      ignore_errors: yes
+    # - name: Unmask Ceph and related services
+    #   systemd:
+    #     name: "{{ item }}"
+    #     masked: no
+    #   loop:
+    #     - ceph-osd
+    #     - rbdmap
+    #     - ceph-crash
+    #     - nvmf-autoconnect
+    #     - nvmefc-boot-connections
+    #     - smartmontools
+    #   ignore_errors: yes
 
     - name: Show partition not found message
       debug:
