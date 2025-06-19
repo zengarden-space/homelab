@@ -1,4 +1,19 @@
 
+- name: Stop k3s services on all nodes first
+  become: true
+  hosts: all
+  tasks:
+    - name: Stop k3s and k3s-agent services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      ignore_errors: true
+      loop:
+        - k3s
+        - k3s-agent
+        - k3s-node
+
 - name: Uninstall k3s on workers
   become: true
   hosts: workers
@@ -53,6 +68,28 @@
         sudo systemctl reset-failed || true
       ignore_errors: true
 
+    - name: Clean Cilium state and configuration
+      shell: |-
+        # Remove Cilium state directories
+        sudo rm -rf /var/lib/cilium || true
+        sudo rm -rf /var/run/cilium || true
+        sudo rm -rf /run/cilium || true
+        sudo rm -rf /sys/fs/bpf/cilium || true
+        
+        # Remove Cilium CNI configs
+        sudo rm -rf /etc/cni/net.d/*cilium* || true
+        sudo rm -rf /opt/cni/bin/cilium* || true
+        
+        # Remove Cilium systemd services
+        sudo rm -f /etc/systemd/system/cilium* || true
+        sudo systemctl daemon-reload || true
+        
+        # Clean up any Cilium mounts
+        sudo umount /sys/fs/bpf/cilium 2>/dev/null || true
+        
+        echo "Cilium cleanup completed"
+      ignore_errors: true
+
     - name: Clean Docker/containerd state if present
       shell: |-
         sudo docker system prune -af || true
@@ -62,37 +99,88 @@
 
     - name: Clean iptables on all nodes
       shell: |-
-        # Delete Cilium rules from built-in chains
-        sudo iptables -D FORWARD -j CILIUM_FORWARD || true
-        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT || true
-        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST || true
-        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE || true
+        # Stop any running Cilium processes first
+        sudo pkill -f cilium || true
+        sudo systemctl stop cilium-agent || true
         
-        # Flush and delete Cilium chains
-        for table in filter nat mangle; do
-          for chain in $(sudo iptables -t $table -S | grep CILIUM | awk '{print $2}' | sort | uniq); do
-            sudo iptables -t $table -F $chain || true
-            sudo iptables -t $table -X $chain || true
+        # Remove Cilium jump rules from built-in chains first
+        sudo iptables -D FORWARD -j CILIUM_FORWARD 2>/dev/null || true
+        sudo iptables -D OUTPUT -j CILIUM_OUTPUT 2>/dev/null || true
+        sudo iptables -D INPUT -j CILIUM_INPUT 2>/dev/null || true
+        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT 2>/dev/null || true
+        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST 2>/dev/null || true
+        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE 2>/dev/null || true
+        sudo iptables -t mangle -D PREROUTING -j CILIUM_PRE_mangle 2>/dev/null || true
+        sudo iptables -t mangle -D POSTROUTING -j CILIUM_POST_mangle 2>/dev/null || true
+        sudo iptables -t raw -D PREROUTING -j CILIUM_PRE_raw 2>/dev/null || true
+        sudo iptables -t raw -D OUTPUT -j CILIUM_POST_raw 2>/dev/null || true
+        
+        # Flush and delete all Cilium chains across all tables
+        for table in filter nat mangle raw; do
+          echo "Cleaning table: $table"
+          # Get all Cilium chains for this table
+          chains=$(sudo iptables -t $table -S 2>/dev/null | grep "^-N CILIUM" | awk '{print $2}' | sort | uniq)
+          for chain in $chains; do
+            echo "  Flushing and deleting chain: $chain"
+            sudo iptables -t $table -F $chain 2>/dev/null || true
+            sudo iptables -t $table -X $chain 2>/dev/null || true
           done
         done
         
-        # Clean up any remaining backup rules
-        sudo iptables -D FORWARD -j CILIUM_FORWARD_old || true
-        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT_old || true
-        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST_old || true
-        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE_old || true
+        # Clean up any backup/old rules
+        sudo iptables -D FORWARD -j CILIUM_FORWARD_old 2>/dev/null || true
+        sudo iptables -t nat -D OUTPUT -j CILIUM_OUTPUT_old 2>/dev/null || true
+        sudo iptables -t nat -D POSTROUTING -j CILIUM_POST_old 2>/dev/null || true
+        sudo iptables -t nat -D PREROUTING -j CILIUM_PRE_old 2>/dev/null || true
+        
+        # Remove any remaining k3s related rules
+        sudo iptables -D FORWARD -j KUBE-FORWARD 2>/dev/null || true
+        sudo iptables -t nat -D POSTROUTING -j KUBE-POSTROUTING 2>/dev/null || true
         
         # Reset all policies to ACCEPT to ensure no blocking rules remain
-        sudo iptables -P INPUT ACCEPT || true
-        sudo iptables -P FORWARD ACCEPT || true
-        sudo iptables -P OUTPUT ACCEPT || true
+        sudo iptables -P INPUT ACCEPT 2>/dev/null || true
+        sudo iptables -P FORWARD ACCEPT 2>/dev/null || true
+        sudo iptables -P OUTPUT ACCEPT 2>/dev/null || true
         
-        echo "Remaining Cilium iptables rules:"
-        sudo iptables -S | grep CILIUM || echo "No Cilium rules found"
-        sudo iptables -t nat -S | grep CILIUM || echo "No Cilium NAT rules found"
+        echo "=== Remaining Cilium/k3s iptables rules ==="
+        sudo iptables -S | grep -E "(CILIUM|KUBE)" || echo "No Cilium/k3s filter rules found"
+        sudo iptables -t nat -S | grep -E "(CILIUM|KUBE)" || echo "No Cilium/k3s NAT rules found"
+        sudo iptables -t mangle -S | grep -E "(CILIUM|KUBE)" || echo "No Cilium/k3s mangle rules found"
+        sudo iptables -t raw -S | grep -E "(CILIUM|KUBE)" || echo "No Cilium/k3s raw rules found"
       ignore_errors: true
 
     - name: Reboot nodes to ensure clean state
       reboot:
         reboot_timeout: 300
       ignore_errors: true
+
+- name: Verify cleanup completion
+  become: true
+  hosts: all
+  tasks:
+    - name: Wait for nodes to come back online
+      wait_for_connection:
+        timeout: 300
+      
+    - name: Verify no k3s processes are running
+      shell: ps aux | grep -E "(k3s|cilium)" | grep -v grep || echo "No k3s/cilium processes found"
+      register: process_check
+      
+    - name: Verify no k3s services are enabled
+      shell: systemctl list-unit-files | grep -E "(k3s|cilium)" || echo "No k3s/cilium services found"
+      register: service_check
+      
+    - name: Final verification of Cilium iptables cleanup
+      shell: |
+        echo "=== Final iptables verification ==="
+        iptables -S | grep -E "(CILIUM|KUBE)" || echo "✓ No Cilium/k3s filter rules found"
+        iptables -t nat -S | grep -E "(CILIUM|KUBE)" || echo "✓ No Cilium/k3s NAT rules found"
+      register: final_iptables_check
+      
+    - name: Display cleanup results
+      debug:
+        msg: |
+          === K3s Uninstall Verification ===
+          Processes: {{ process_check.stdout }}
+          Services: {{ service_check.stdout }}
+          {{ final_iptables_check.stdout }}
