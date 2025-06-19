@@ -1,0 +1,194 @@
+---
+# Source: node-exporter/templates/networkpolicy.yaml
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: node-exporter
+  namespace: "node-exporter"
+  labels:
+    app.kubernetes.io/instance: node-exporter
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/version: 1.9.1
+    helm.sh/chart: node-exporter-4.5.13
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: node-exporter
+      app.kubernetes.io/name: node-exporter
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    - ports:
+        - port: 9100
+---
+# Source: node-exporter/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-exporter
+  namespace: "node-exporter"
+  labels:
+    app.kubernetes.io/instance: node-exporter
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/version: 1.9.1
+    helm.sh/chart: node-exporter-4.5.13
+automountServiceAccountToken: false
+---
+# Source: node-exporter/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: "node-exporter"
+  annotations:
+    prometheus.io/scrape: "true"
+  labels:
+    app.kubernetes.io/instance: node-exporter
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/version: 1.9.1
+    helm.sh/chart: node-exporter-4.5.13
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+      nodePort: null
+  selector:
+    app.kubernetes.io/instance: node-exporter
+    app.kubernetes.io/name: node-exporter
+---
+# Source: node-exporter/templates/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: "node-exporter"
+  labels:
+    app.kubernetes.io/instance: node-exporter
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: node-exporter
+    app.kubernetes.io/version: 1.9.1
+    helm.sh/chart: node-exporter-4.5.13
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: node-exporter
+      app.kubernetes.io/name: node-exporter
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  minReadySeconds: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: node-exporter
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: node-exporter
+        app.kubernetes.io/version: 1.9.1
+        helm.sh/chart: node-exporter-4.5.13
+    spec:
+      
+      serviceAccountName: node-exporter
+      automountServiceAccountToken: false
+      affinity:
+        podAffinity:
+          
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: node-exporter
+                    app.kubernetes.io/name: node-exporter
+                topologyKey: kubernetes.io/hostname
+              weight: 1
+        nodeAffinity:
+          
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+        supplementalGroups: []
+        sysctls: []
+      containers:
+        - name: node-exporter
+          image: docker.io/bitnami/node-exporter:1.9.1-debian-12-r5
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --web.listen-address=0.0.0.0:9100
+          envFrom:
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            tcpSocket:
+              port: metrics
+          readinessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            httpGet:
+              path: /
+              port: metrics
+          resources:
+            limits:
+              cpu: 150m
+              ephemeral-storage: 2Gi
+              memory: 192Mi
+            requests:
+              cpu: 100m
+              ephemeral-storage: 50Mi
+              memory: 128Mi
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+      hostNetwork: true
+      hostPID: true
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+

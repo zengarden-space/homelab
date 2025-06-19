@@ -1,0 +1,282 @@
+---
+# Source: gitea-runner/templates/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitea-token-generator
+---
+# Source: gitea-runner/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-action-runner-config
+data:
+  config.yaml: |-
+    runner:
+      capacity: 1
+    cache:
+      enabled: true
+      external_server: "http://gitea-action-runner-cache"
+    container:
+      privileged: true
+      workdir_parent: /data/workspace
+    host:
+      workdir_parent: /data/act
+---
+# Source: gitea-runner/templates/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: runner-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+# Source: gitea-runner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gitea-token-generator-gitea-access
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+---
+# Source: gitea-runner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitea-token-generator-gitea-access
+subjects:
+- kind: ServiceAccount
+  name: gitea-token-generator
+  namespace: gitea-runner
+roleRef:
+  kind: ClusterRole
+  name: gitea-token-generator-gitea-access
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: gitea-runner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitea-token-generator
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "update", "patch", "get", "list"]
+---
+# Source: gitea-runner/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitea-token-generator
+subjects:
+- kind: ServiceAccount
+  name: gitea-token-generator
+roleRef:
+  kind: Role
+  name: gitea-token-generator
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: gitea-runner/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-action-runner-cache
+spec:
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: gitea-action-runner-cache
+---
+# Source: gitea-runner/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: gitea-action-runner-cache
+  name: gitea-action-runner-cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitea-action-runner-cache
+  template:
+    metadata:
+      labels:
+        app: gitea-action-runner-cache
+    spec:
+      volumes:
+      - name: cache-data
+        persistentVolumeClaim:
+          claimName: runner-cache
+      containers:
+      - name: runner
+        image: "gitea/act_runner:0.2.11"
+        command: ["/usr/local/bin/act_runner", "cache-server", "-p", "8080", "-d", "/data"]
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        volumeMounts:
+        - name: cache-data
+          mountPath: /data
+---
+# Source: gitea-runner/templates/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: gitea-action-runner
+  name: gitea-action-runner
+spec:
+  replicas: 5
+  serviceName: gitea-action-runner
+  selector:
+    matchLabels:
+      app: gitea-action-runner
+  template:
+    metadata:
+      labels:
+        app: gitea-action-runner
+    spec:
+      volumes:
+      - name: docker-certs
+        emptyDir: {}
+      - name: docker-sock
+        emptyDir: {}
+      - name: runner-config
+        configMap:
+          name: gitea-action-runner-config
+      containers:
+      - name: runner
+        image: "gitea/act_runner:0.2.11"
+        command: ["sh", "-c", "while ! nc -z localhost 2376 </dev/null; do echo 'waiting for docker daemon...'; sleep 5; done; /sbin/tini -- /opt/act/run.sh"]
+        imagePullPolicy: Always
+        env:
+        - name: CONFIG_FILE
+          value: /config/config.yaml
+        - name: GITEA_INSTANCE_URL
+          value: "https://gitea.zengarden.space"
+        - name: GITEA_RUNNER_REGISTRATION_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitea-action-runner
+              key: token
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+        - name: docker-certs
+          mountPath: /certs
+        - name: runner-data
+          mountPath: /data
+        - name: runner-config
+          mountPath: /config
+      - name: daemon
+        image: docker:23.0.6-dind
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: /certs
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+        - name: docker-certs
+          mountPath: /certs
+  volumeClaimTemplates:
+    - metadata:
+        name: runner-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+# Source: gitea-runner/templates/job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-token-generator
+spec:
+  template:
+    spec:
+      serviceAccountName: gitea-token-generator
+      restartPolicy: Never
+      containers:
+      - name: generate-token-and-create-secret
+        image: bitnami/kubectl:1.33.1
+        command: ['sh', '-c']
+        args:
+        - |
+          set -e
+          
+          echo "Waiting for Gitea pods to be ready..."
+          kubectl wait --for=condition=ready pod -l app=gitea -n gitea --timeout=300s
+          echo "Gitea pods are ready"
+          
+          echo "Finding a running Gitea pod in gitea namespace..."
+          GITEA_POD=$(kubectl get pods -n gitea -l app=gitea -o jsonpath='{.items[0].metadata.name}')
+          
+          if [ -z "$GITEA_POD" ]; then
+            echo "Error: No Gitea pod found"
+            exit 1
+          fi
+          
+          echo "Found Gitea pod: $GITEA_POD"
+          
+          echo "Generating runner token using kubectl exec..."
+          TOKEN=$(kubectl exec -n gitea "$GITEA_POD" -- gitea actions generate-runner-token)
+          
+          if [ -z "$TOKEN" ]; then
+            echo "Error: Failed to generate token"
+            exit 1
+          fi
+          
+          echo "Successfully generated runner registration token"
+          echo "Token length: $(echo -n "$TOKEN" | wc -c) characters"
+          
+          echo "Creating secret with token..."
+          cat << EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: gitea-action-runner
+            namespace: gitea-runner
+          stringData:
+            token: "$TOKEN"
+          EOF
+          
+          echo "Secret created successfully"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+---
+# Source: gitea-runner/templates/secret.yaml
+# This secret is created by the gitea-token-generator Job
+# See job.yaml for the implementation
+

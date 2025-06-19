@@ -1,0 +1,607 @@
+---
+# Source: ingress-nginx/templates/controller-networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external-controller
+  namespace: external-tunnel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/instance: ingress-nginx-external
+      app.kubernetes.io/component: controller
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+  egress:
+    - {}
+---
+# Source: ingress-nginx/templates/controller-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external
+  namespace: external-tunnel
+automountServiceAccountToken: true
+---
+# Source: ingress-nginx/templates/controller-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external-controller
+  namespace: external-tunnel
+data:
+---
+# Source: ingress-nginx/templates/clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+  name: ingress-nginx-external
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - nodes
+      - pods
+      - secrets
+      - namespaces
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses/status
+    verbs:
+      - update
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingressclasses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - list
+      - watch
+      - get
+---
+# Source: ingress-nginx/templates/clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+  name: ingress-nginx-external
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ingress-nginx-external
+subjects:
+  - kind: ServiceAccount
+    name: ingress-nginx-external
+    namespace: external-tunnel
+---
+# Source: ingress-nginx/templates/controller-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external
+  namespace: external-tunnel
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - pods
+      - secrets
+      - endpoints
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  # Omit Ingress status permissions if `--update-status` is disabled.
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses/status
+    verbs:
+      - update
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingressclasses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    resourceNames:
+      - ingress-nginx-external-leader
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - list
+      - watch
+      - get
+---
+# Source: ingress-nginx/templates/controller-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external
+  namespace: external-tunnel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ingress-nginx-external
+subjects:
+  - kind: ServiceAccount
+    name: ingress-nginx-external
+    namespace: external-tunnel
+---
+# Source: ingress-nginx/templates/controller-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external-controller
+  namespace: external-tunnel
+spec:
+  type: LoadBalancer
+  ipFamilyPolicy: SingleStack
+  ipFamilies: 
+    - IPv4
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+      appProtocol: http
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: https
+      appProtocol: https
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/component: controller
+---
+# Source: ingress-nginx/templates/controller-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: ingress-nginx-external-controller
+  namespace: external-tunnel
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/instance: ingress-nginx-external
+      app.kubernetes.io/component: controller
+  replicas: 1
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 10
+  minReadySeconds: 0
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: ingress-nginx-4.12.3
+        app.kubernetes.io/name: ingress-nginx
+        app.kubernetes.io/instance: ingress-nginx-external
+        app.kubernetes.io/version: "1.12.3"
+        app.kubernetes.io/part-of: ingress-nginx
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: controller
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: controller
+          image: registry.k8s.io/ingress-nginx/controller:v1.12.3@sha256:ac444cd9515af325ba577b596fe4f27a34be1aa330538e8b317ad9d6c8fb94ee
+          imagePullPolicy: IfNotPresent
+          lifecycle: 
+            preStop:
+              exec:
+                command:
+                - /wait-shutdown
+          args: 
+            - /nginx-ingress-controller
+            - --publish-service=$(POD_NAMESPACE)/ingress-nginx-external-controller
+            - --election-id=ingress-nginx-external-leader
+            - --controller-class=k8s.io/ingress-nginx-external
+            - --ingress-class=external
+            - --configmap=$(POD_NAMESPACE)/ingress-nginx-external-controller
+          securityContext: 
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 82
+            allowPrivilegeEscalation: false
+            seccompProfile: 
+              type: RuntimeDefault
+            capabilities:
+              drop:
+              - ALL
+              add:
+              - NET_BIND_SERVICE
+            readOnlyRootFilesystem: false
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LD_PRELOAD
+              value: /usr/local/lib/libmimalloc.so
+          livenessProbe: 
+            failureThreshold: 5
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe: 
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          resources: 
+            requests:
+              cpu: 100m
+              memory: 90Mi
+      nodeSelector: 
+        kubernetes.io/os: linux
+      serviceAccountName: ingress-nginx-external
+      terminationGracePeriodSeconds: 300
+---
+# Source: ingress-nginx/templates/controller-ingressclass.yaml
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  labels:
+    helm.sh/chart: ingress-nginx-4.12.3
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx-external
+    app.kubernetes.io/version: "1.12.3"
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: controller
+  name: external
+spec:
+  controller: k8s.io/ingress-nginx-external
+---
+# Source: ingress-nginx/templates/controller-poddisruptionbudget.yaml
+# PDB is not supported for DaemonSets.
+# https://github.com/kubernetes/kubernetes/issues/108124
+
+---
+# Source: cloudflare-tunnel/templates/serviceaccount.yaml
+# Here we create a service account with no privileges to run the
+# deployment - just in case the default service account is different.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloudflare-tunnel
+  labels:
+    helm.sh/chart: cloudflare-tunnel-0.3.2
+    app.kubernetes.io/name: cloudflare-tunnel
+    app.kubernetes.io/instance: cloudflare-tunnel
+    app.kubernetes.io/version: "2025.6.0"
+    app.kubernetes.io/managed-by: Helm
+---
+# Source: cloudflare-tunnel/templates/configmap.yaml
+# This configmap stores the configuration used by cloudflared.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflare-tunnel
+data:
+  config.yaml: |
+    # Name of the tunnel you want to run
+    tunnel: 
+    # The location of the secret containing the tunnel credentials
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    # General purpose TCP routing for the network
+    warp-routing:
+      enabled: false
+    # Serves the metrics server under /metrics and the readiness server under /ready
+    metrics: 0.0.0.0:2000
+    # Autoupdates applied in a k8s pod will be lost when the pod is removed or restarted, so
+    # autoupdate doesn't make sense in Kubernetes. However, outside of Kubernetes, we strongly
+    # recommend using autoupdate.
+    no-autoupdate: true
+    # The `ingress` block tells cloudflared which local service to route incoming
+    # requests to. For more about ingress rules, see
+    # https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/configuration/ingress
+    ingress:
+      - hostname: zengarden.space
+        originRequest:
+          noTLSVerify: true
+        service: https://ingress-nginx-external-controller.external-tunnel.svc
+      - hostname: '*.zengarden.space'
+        originRequest:
+          noTLSVerify: true
+        service: https://ingress-nginx-external-controller.external-tunnel.svc
+      # This rule matches any traffic which didn't match a previous rule, and responds with HTTP 404.
+      - service: http_status:404
+---
+# Source: cloudflare-tunnel/templates/deployment.yaml
+# Here we deploy cloudflared images. The tunnel credentials are stored in
+# a k8s secret, and the configuration is stored in a k8s configmap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflare-tunnel
+  labels:
+    helm.sh/chart: cloudflare-tunnel-0.3.2
+    app.kubernetes.io/name: cloudflare-tunnel
+    app.kubernetes.io/instance: cloudflare-tunnel
+    app.kubernetes.io/version: "2025.6.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflare-tunnel
+      app.kubernetes.io/instance: cloudflare-tunnel
+  template:
+    metadata:
+      annotations:
+        # These are here so the deployment rolls when the config or secret change.
+        checksum/configmap: 0606729864b3183dde969fa0744fd49dc94a9279de2d49c6df02559e2dd9170f
+        checksum/secret: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+      labels:
+        app.kubernetes.io/name: cloudflare-tunnel
+        app.kubernetes.io/instance: cloudflare-tunnel
+    spec:
+      serviceAccountName: cloudflare-tunnel
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: cloudflare-tunnel
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          image: "cloudflare/cloudflared:2025.6.0"
+          imagePullPolicy: IfNotPresent
+          args:
+            - tunnel
+            # Points cloudflared to the config file, which configures what
+            # cloudflared will actually do. This file is created by a ConfigMap.
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+            - ""
+          livenessProbe:
+            httpGet:
+              # Cloudflared has a /ready endpoint which returns 200 if and only if
+              # it has an active connection to the edge.
+              path: /ready
+              port: 2000
+            failureThreshold: 1
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            # Each tunnel has an associated "credentials file" which authorizes machines
+            # to run the tunnel. cloudflared will read this file from its local filesystem,
+            # and it'll be stored in a k8s secret.
+            - name: creds
+              mountPath: /etc/cloudflared/creds
+              readOnly: true
+          resources:
+            {}
+      volumes:
+        - name: creds
+          secret:
+            secretName: cloud-flare-tunnel-credentials
+        - name: config
+          configMap:
+            name: cloudflare-tunnel
+            items:
+              - key: config.yaml
+                path: config.yaml
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 10
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/instance
+                      operator: In
+                      values:
+                        - cloudflare-tunnel
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - cloudflare-tunnel
+

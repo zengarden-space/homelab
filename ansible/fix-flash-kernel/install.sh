@@ -1,2 +1,2 @@
 source .env
-ansible-playbook -v -i hosts.yaml install.yaml -K
+ansible-playbook -v -i hosts.yaml install.yaml

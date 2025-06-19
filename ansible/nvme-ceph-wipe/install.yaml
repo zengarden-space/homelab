@@ -1,0 +1,73 @@
+---
+- name: Wipe Ceph BlueStore data from NVMe partitions
+  become: true
+  hosts: masters
+  vars:
+    nvme_device: "/dev/nvme0n1"
+    ceph_partition: "{{ nvme_device }}p2"
+    
+  tasks:
+    - name: Ping hosts
+      ping:
+
+    - name: Execute Ceph wipe sequence
+      shell: |
+        set -euo pipefail
+        
+        echo "=== Masking Ceph and related services ==="
+        sudo systemctl mask ceph-osd || true
+        sudo systemctl mask rbdmap || true
+        sudo systemctl mask ceph-crash || true
+        sudo systemctl mask nvmf-autoconnect || true
+        sudo systemctl mask nvmefc-boot-connections || true
+        sudo systemctl mask smartmontools || true
+        
+        echo "=== Installing ceph-osd package ==="
+        sudo apt update
+        sudo apt install -y ceph-osd
+        
+        echo "=== Checking Ceph partition {{ ceph_partition }} ==="
+        if [ -b "{{ ceph_partition }}" ]; then
+          echo "Found Ceph partition {{ ceph_partition }}, proceeding with zap"
+          sudo ceph-volume lvm zap {{ ceph_partition }}
+          echo "Zap operation completed"
+        else
+          echo "Ceph partition {{ ceph_partition }} not found, skipping zap operation"
+        fi
+        
+        echo "=== Removing ceph-osd package ==="
+        sudo apt remove -y ceph-osd
+        sudo apt autoremove -y
+        
+        echo "=== Unmasking services ==="
+        sudo systemctl unmask ceph-osd || true
+        sudo systemctl unmask rbdmap || true
+        sudo systemctl unmask ceph-crash || true
+        sudo systemctl unmask nvmf-autoconnect || true
+        sudo systemctl unmask nvmefc-boot-connections || true
+        sudo systemctl unmask smartmontools || true
+        
+        echo "=== Ceph wipe sequence completed ==="
+      register: ceph_wipe_result
+
+    - name: Show Ceph wipe results
+      debug:
+        msg: "{{ ceph_wipe_result.stdout_lines }}"
+
+    - name: Display final status
+      shell: |
+        echo "=== Partition status for {{ nvme_device }} ==="
+        lsblk {{ nvme_device }} || echo "Device not found"
+        echo ""
+        echo "=== Ceph partition status ==="
+        if [ -b "{{ ceph_partition }}" ]; then
+          echo "Partition {{ ceph_partition }} exists"
+          file -s {{ ceph_partition }}
+        else
+          echo "Partition {{ ceph_partition }} not found"
+        fi
+      register: final_status
+
+    - name: Show final status
+      debug:
+        msg: "{{ final_status.stdout_lines }}"

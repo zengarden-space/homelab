@@ -1,0 +1,47 @@
+environments:
+  default:
+    values:
+      - env.yaml
+
+releases:
+  - name: ip-ranges-config
+    namespace: metallb-system
+    chart: charts/ip-ranges-config
+    values:
+      - ipRange: {{ .Values.loadBalancing.ipRange | quote }}
+
+  - name: letsencrypt-prod
+    namespace: cert-manager
+    chart: charts/letsencrypt-prod
+    values:
+      - cloudflareToken: {{ .Values.letsEncrypt.cloudflareToken | quote }}
+        cloudflareAccount: {{ .Values.letsEncrypt.cloudflareAccount | quote }}
+
+  - name: external-dns-config
+    namespace: external-dns
+    chart: charts/external-dns-config
+    values:
+      - mikrotik:
+          baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
+          username: {{ .Values.externalDns.mikrotikUsername | quote }}
+          password: {{ .Values.externalDns.mikrotikPassword | quote }}
+
+  - name: authelia-config
+    namespace: authelia
+    chart: ./charts/authelia-config
+
+  - name: cloudflare-tunnel-config
+    namespace: external-tunnel
+    chart: charts/cloudflare-tunnel-config
+    values:
+      - cloudflare:
+          account: {{ .Values.tunnel.cloudflareAccount | quote }}
+          tunnelId: {{ .Values.tunnel.cloudflareTunelId | quote }}
+          secret: {{ .Values.tunnel.cloudflareToken | quote }}
+
+  - name: docker-hub-config
+    namespace: gitea
+    chart: charts/docker-hub-config
+    values:
+      - username: {{ .Values.dockerHub.username | quote }}
+        password: {{ .Values.dockerHub.password | quote }}

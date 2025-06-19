@@ -295,7 +295,7 @@
         
         kubectl get pods -n kube-system
 
-        kubectl wait pods --all -n kube-system --for=condition=Ready --timeout=15m
+        kubectl wait pods --all -n kube-system --for=condition=Ready --timeout=20m
 
 - name: Deploy native Ceph cluster via Rook
   become: true
@@ -559,7 +559,7 @@
         EOF
         
         echo "⏳ Waiting for Ceph toolbox to be ready..."
-        kubectl wait --for=condition=Available --timeout=5m -n rook-ceph deployment/rook-ceph-tools || true
+        kubectl wait --for=condition=Available --timeout=20m -n rook-ceph deployment/rook-ceph-tools || true
 
     - name: Create RBD StorageClass and set as default
       shell: |-
@@ -568,7 +568,7 @@
         
         # Wait for Ceph cluster to be ready first
         echo "⏳ Waiting for Ceph cluster to be healthy..."
-        kubectl wait --for=condition=Ready --timeout=15m -n rook-ceph cephcluster/rook-ceph || true
+        kubectl wait --for=condition=Ready --timeout=20m -n rook-ceph cephcluster/rook-ceph || true
         
         # Create RBD pool
         cat <<EOF | kubectl apply -f -
@@ -584,7 +584,7 @@
         EOF
         
         # Wait for pool to be ready
-        kubectl wait --for=condition=Ready --timeout=5m -n rook-ceph cephblockpool/replicapool
+        kubectl wait --for=condition=Ready --timeout=15m -n rook-ceph cephblockpool/replicapool
         
         # Remove default annotation from local-path StorageClass
         kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}' || true

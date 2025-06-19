@@ -36,7 +36,7 @@ fi
 
 # Run the installation playbook
 echo -e "${GREEN}Running system updates playbook...${NC}"
-ansible-playbook -v -i hosts.yaml install.yaml -K
+ansible-playbook -v -i hosts.yaml install.yaml
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}System updates completed successfully!${NC}"
