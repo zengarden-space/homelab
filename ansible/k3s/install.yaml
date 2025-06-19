@@ -491,79 +491,6 @@
         kubectl exec -n rook-ceph deployment/rook-ceph-tools -- ceph status || echo "Ceph tools not ready yet"
       ignore_errors: true
 
-    - name: Deploy Ceph toolbox for debugging
-      shell: |-
-        set -euxo pipefail
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        
-        # Deploy Ceph toolbox
-        cat <<EOF | kubectl apply -f -
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: rook-ceph-tools
-          namespace: rook-ceph
-          labels:
-            app: rook-ceph-tools
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app: rook-ceph-tools
-          template:
-            metadata:
-              labels:
-                app: rook-ceph-tools
-            spec:
-              dnsPolicy: ClusterFirstWithHostNet
-              containers:
-              - name: rook-ceph-tools
-                image: quay.io/ceph/ceph:v18.2.0
-                command:
-                  - /bin/bash
-                  - -c
-                  - |
-                    # Wait for the connection and then maintain it
-                    sleep infinity
-                imagePullPolicy: IfNotPresent
-                env:
-                  - name: ROOK_CEPH_USERNAME
-                    valueFrom:
-                      secretKeyRef:
-                        name: rook-ceph-mon
-                        key: ceph-username
-                  - name: ROOK_CEPH_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: rook-ceph-mon
-                        key: ceph-secret
-                volumeMounts:
-                  - mountPath: /etc/ceph
-                    name: ceph-config
-                    readOnly: true
-                  - name: mon-endpoint-volume
-                    mountPath: /etc/rook
-                    readOnly: true
-              volumes:
-                - name: ceph-config
-                  configMap:
-                    name: rook-ceph-config
-                - name: mon-endpoint-volume
-                  configMap:
-                    name: rook-ceph-mon-endpoints
-                    items:
-                    - key: data
-                      path: mon-endpoints
-              tolerations:
-                - key: node.kubernetes.io/unreachable
-                  operator: Exists
-                  effect: NoExecute
-                  tolerationSeconds: 5
-        EOF
-        
-        echo "⏳ Waiting for Ceph toolbox to be ready..."
-        kubectl wait --for=condition=Available --timeout=20m -n rook-ceph deployment/rook-ceph-tools || true
-
     - name: Create RBD StorageClass and set as default
       shell: |-
         set -euxo pipefail
@@ -587,7 +514,7 @@
         EOF
         
         # Wait for pool to be ready
-        kubectl wait --for=condition=Ready --timeout=15m -n rook-ceph cephblockpool/replicapool
+        kubectl wait --for=jsonpath='{.status.phase}'=Ready --timeout=15m -n rook-ceph cephblockpool/replicapool
         
         # Remove default annotation from local-path StorageClass
         kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}' || true
