@@ -4,7 +4,7 @@
   hosts: masters
   vars:
     nvme_device: "/dev/nvme0n1"
-    ceph_partition: "{{ nvme_device }}p2"
+    ceph_partition: "{{ nvme_device }}p3"
     
   tasks:
     - name: Ping hosts

@@ -317,9 +317,9 @@
 
 - name: Prepare Ceph storage devices on all nodes (partitioned)
   become: true
-  hosts: [bootstrapMaster, masters, workers]
   vars:
     ceph_partition: "/dev/nvme0n1p3"
+  hosts: [bootstrapMaster, masters, workers]
   tasks:
     - name: Check NVMe Ceph partition exists
       stat:
@@ -346,6 +346,8 @@
 
 - name: Deploy native Ceph cluster via Rook
   become: true
+  vars:
+    ceph_partition: "/dev/nvme0n1p3"
   hosts: bootstrapMaster
   tasks:
     - name: Create native CephCluster
