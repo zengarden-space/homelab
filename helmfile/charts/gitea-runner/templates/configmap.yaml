@@ -8,7 +8,7 @@ data:
       capacity: 1
     cache:
       enabled: true
-      external_server: "http://gitea-action-runner-cache"
+      external_server: "http://gitea-action-runner-cache/"
     container:
       privileged: true
       workdir_parent: /data/workspace

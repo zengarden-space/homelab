@@ -439,3 +439,46 @@ releases:
   - name: gitea-runner
     namespace: gitea-runner
     chart: charts/gitea-runner
+
+#  - name: velero
+#    namespace: velero
+#    chart: vmware-tanzu/velero
+#    version: 7.0.0
+#    values:
+#      - configuration:
+#          backupStorageLocation:
+#          - name: default
+#            bucket: blade-cluster-zengarden-space
+#            default: true
+#            provider: aws
+#            credential:
+#              name: test-credential
+#              key: test-key
+#            config:
+#              region: eu-central-1
+#              profile: eu-central-1-profile
+#          volumeSnapshotLocation:
+#          - name: blade-cluster-zengarden-space
+#            provider: aws
+#            config:
+#              region: eu-central-1
+#        initContainers:
+#          - name: velero-plugin-for-aws
+#            image: velero/velero-plugin-for-aws:v1.8.0
+#            volumeMounts:
+#              - mountPath: /target
+#                name: plugins
+#        credentials:
+#          useSecret: true
+#          secretContents:
+#            cloud: |
+#              [default]
+#              aws_access_key_id = admin
+#              aws_secret_access_key = {{ .Values.minio.password | quote }}
+#        schedules:
+#          all-namespaces-daily:
+#            schedule: "0 0 * * *"
+#            template:
+#              ttl: "240h"
+#              includedNamespaces:
+#                - "*"
