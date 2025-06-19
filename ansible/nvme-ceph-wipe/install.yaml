@@ -29,8 +29,19 @@
         echo "=== Checking Ceph partition {{ ceph_partition }} ==="
         if [ -b "{{ ceph_partition }}" ]; then
           echo "Found Ceph partition {{ ceph_partition }}, proceeding with zap"
+          
+          echo "=== Current partition information ==="
+          sudo parted {{ nvme_device }} print || true
+          
           sudo ceph-volume lvm zap {{ ceph_partition }}
           echo "Zap operation completed"
+          
+          echo "=== Removing PARTLABEL from {{ ceph_partition }} ==="
+          sudo parted {{ nvme_device }} set 2 name ''
+          echo "PARTLABEL removed from {{ ceph_partition }}"
+          
+          echo "=== Updated partition information ==="
+          sudo parted {{ nvme_device }} print || true
         else
           echo "Ceph partition {{ ceph_partition }} not found, skipping zap operation"
         fi
