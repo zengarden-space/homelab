@@ -10,60 +10,91 @@
     - name: Ping hosts
       ping:
 
-    - name: Execute Ceph wipe sequence
-      shell: |
-        set -euo pipefail
-        
-        echo "=== Masking Ceph and related services ==="
-        sudo systemctl mask ceph-osd || true
-        sudo systemctl mask rbdmap || true
-        sudo systemctl mask ceph-crash || true
-        sudo systemctl mask nvmf-autoconnect || true
-        sudo systemctl mask nvmefc-boot-connections || true
-        sudo systemctl mask smartmontools || true
-        
-        echo "=== Installing ceph-osd package ==="
-        sudo apt update
-        sudo apt install -y ceph-osd
-        
-        echo "=== Checking Ceph partition {{ ceph_partition }} ==="
-        if [ -b "{{ ceph_partition }}" ]; then
-          echo "Found Ceph partition {{ ceph_partition }}, proceeding with zap"
-          
-          echo "=== Current partition information ==="
-          sudo parted {{ nvme_device }} print || true
-          
-          sudo ceph-volume lvm zap {{ ceph_partition }}
-          echo "Zap operation completed"
-          
-          echo "=== Removing PARTLABEL from {{ ceph_partition }} ==="
-          sudo parted {{ nvme_device }} set 2 name ''
-          echo "PARTLABEL removed from {{ ceph_partition }}"
-          
-          echo "=== Updated partition information ==="
-          sudo parted {{ nvme_device }} print || true
-        else
-          echo "Ceph partition {{ ceph_partition }} not found, skipping zap operation"
-        fi
-        
-        echo "=== Removing ceph-osd package ==="
-        sudo apt remove -y ceph-osd
-        sudo apt autoremove -y
-        
-        echo "=== Unmasking services ==="
-        sudo systemctl unmask ceph-osd || true
-        sudo systemctl unmask rbdmap || true
-        sudo systemctl unmask ceph-crash || true
-        sudo systemctl unmask nvmf-autoconnect || true
-        sudo systemctl unmask nvmefc-boot-connections || true
-        sudo systemctl unmask smartmontools || true
-        
-        echo "=== Ceph wipe sequence completed ==="
-      register: ceph_wipe_result
+    - name: Mask Ceph and related services
+      systemd:
+        name: "{{ item }}"
+        masked: yes
+      loop:
+        - ceph-osd
+        - rbdmap
+        - ceph-crash
+        - nvmf-autoconnect
+        - nvmefc-boot-connections
+        - smartmontools
+      ignore_errors: yes
 
-    - name: Show Ceph wipe results
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install ceph-osd package
+      apt:
+        name: ceph-osd
+        state: present
+
+    - name: Check if Ceph partition exists
+      stat:
+        path: "{{ ceph_partition }}"
+      register: ceph_partition_stat
+
+    - name: Show current partition information
+      command: parted {{ nvme_device }} print
+      register: partition_info_before
+      ignore_errors: yes
+      when: ceph_partition_stat.stat.exists
+
+    - name: Display current partition information
       debug:
-        msg: "{{ ceph_wipe_result.stdout_lines }}"
+        msg: "{{ partition_info_before.stdout_lines }}"
+      when: ceph_partition_stat.stat.exists and partition_info_before is defined
+
+    - name: Zap Ceph partition with ceph-volume
+      command: ceph-volume lvm zap {{ ceph_partition }}
+      register: zap_result
+      when: ceph_partition_stat.stat.exists
+
+    - name: Remove PARTLABEL from Ceph partition (GPT)
+      command: parted {{ nvme_device }} -s name 2 "notset"
+      register: partlabel_removal
+      when: ceph_partition_stat.stat.exists
+
+    - name: Show updated partition information
+      command: parted {{ nvme_device }} print
+      register: partition_info_after
+      ignore_errors: yes
+      when: ceph_partition_stat.stat.exists
+
+    - name: Display updated partition information
+      debug:
+        msg: "{{ partition_info_after.stdout_lines }}"
+      when: ceph_partition_stat.stat.exists and partition_info_after is defined
+
+    - name: Remove ceph-osd package
+      apt:
+        name: ceph-osd
+        state: absent
+
+    - name: Run apt autoremove
+      apt:
+        autoremove: yes
+
+    - name: Unmask Ceph and related services
+      systemd:
+        name: "{{ item }}"
+        masked: no
+      loop:
+        - ceph-osd
+        - rbdmap
+        - ceph-crash
+        - nvmf-autoconnect
+        - nvmefc-boot-connections
+        - smartmontools
+      ignore_errors: yes
+
+    - name: Show partition not found message
+      debug:
+        msg: "Ceph partition {{ ceph_partition }} not found, skipping zap operation"
+      when: not ceph_partition_stat.stat.exists
 
     - name: Display final status
       shell: |
