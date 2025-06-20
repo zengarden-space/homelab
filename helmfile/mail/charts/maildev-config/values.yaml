@@ -1,0 +1,18 @@
+# Default values for maildev-config
+# This chart provides additional configuration for MailDev
+
+# Certificate configuration
+certificate:
+  enabled: true
+  name: smtp
+  secretName: smtp-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - smtp.zengarden.space
+
+# Network Policy configuration
+networkPolicy:
+  enabled: true
+  smtpPort: 25

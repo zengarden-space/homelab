@@ -61,8 +61,10 @@ releases:
           notifier:
             smtp:
               enabled: true
-              address: smtp://smtp.zengarden.space
+              address: smtp://maildev-smtp.mail.svc
               sender: authentication bot <noreply@zengarden.space>
+              disable_require_tls: true
+              disable_starttls: true
         secret:
           additionalSecrets:
             authelia-users:

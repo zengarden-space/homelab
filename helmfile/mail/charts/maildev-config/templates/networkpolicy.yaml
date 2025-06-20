@@ -1,0 +1,20 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "maildev-config.fullname" . }}-smtp-access
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "maildev-config.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: maildev
+  policyTypes:
+  - Ingress
+  ingress:
+  - from: []  # Allow from any pod in any namespace
+    ports:
+    - protocol: TCP
+      port: {{ .Values.networkPolicy.smtpPort }}
+{{- end }}

@@ -1,12 +1,16 @@
-repositories:
-  - name: christianhuth
-    url: https://charts.christianhuth.de
+repositories: []
 
 releases:
+  - name: maildev-config
+    namespace: mail
+    chart: ./charts/maildev-config
+
   - name: maildev
     namespace: mail
     chart: christianhuth/maildev
     version: 1.3.4
+    needs:
+     - maildev-config
     values:
       - ingress:
           enabled: true
@@ -22,10 +26,6 @@ releases:
             - secretName: maildev-tls
               hosts:
                 - mail.zengarden.space
-        services:
-          smtp:
-            type: LoadBalancer
-            port: 25
         maildev:
           config:
             smtp:
@@ -34,17 +34,12 @@ releases:
         podSecurityContext:
           runAsNonRoot: true
           runAsUser: 1000
-        securityContext:
-          allowPrivilegeEscalation: false
+          runAsGroup: 1000
+          fsGroup: 1000
           seccompProfile:
             type: RuntimeDefault
-            capabilities:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
             drop:
             - ALL
-    strategicMergePatches:
-      - apiVersion: v1
-        kind: Service
-        metadata:
-          name: maildev-smtp
-          annotations:
-            external-dns.alpha.kubernetes.io/hostname: smtp.zengarden.space
