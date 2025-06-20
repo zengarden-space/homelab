@@ -11,14 +11,14 @@ releases:
   - name: cert-manager
     namespace: cert-manager
     chart: jetstack/cert-manager
-    version: v1.16.0
+    version: v1.18.1
     values:
       - installCRDs: true
 
   - name: trust-manager
     namespace: cert-manager
     chart: jetstack/trust-manager
-    version: v0.12.0
+    version: v0.17.1
     wait: true
     values:
       - app:
