@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gitea-org-creator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-org-creator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "gitea-org-creator.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: {{ .Values.job.restartPolicy }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: create-organization
+        image: "{{ .Values.job.image.repository }}:{{ .Values.job.image.tag }}"
+        imagePullPolicy: {{ .Values.job.image.pullPolicy }}
+        command: ['/bin/sh']
+        args:
+        - -c
+        - |
+          # Copy script to writable location and execute
+          cp /scripts/create-org.sh /tmp/create-org.sh
+          chmod +x /tmp/create-org.sh
+          /bin/sh /tmp/create-org.sh
+        env:
+        - name: ORG_NAME
+          value: {{ .Values.organization.name | quote }}
+        - name: ORG_DESCRIPTION
+          value: {{ .Values.organization.description | quote }}
+        - name: ORG_WEBSITE
+          value: {{ .Values.organization.website | quote }}
+        - name: ORG_VISIBILITY
+          value: {{ .Values.organization.visibility | quote }}
+        - name: GITEA_SERVICE_NAME
+          value: {{ .Values.gitea.service.name | quote }}
+        - name: GITEA_NAMESPACE
+          value: {{ .Values.gitea.service.namespace | quote }}
+        - name: GITEA_SERVICE_PORT
+          value: {{ .Values.gitea.service.port | quote }}
+        - name: GITEA_ADMIN_USERNAME
+          value: {{ .Values.gitea.admin.username | quote }}
+        - name: GITEA_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-org-creator.fullname" . }}-admin
+              key: password
+        volumeMounts:
+        - name: script-volume
+          mountPath: /scripts
+          readOnly: true
+        securityContext:
+          {{- toYaml .Values.job.securityContext | nindent 10 }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      volumes:
+      - name: script-volume
+        configMap:
+          name: {{ include "gitea-org-creator.fullname" . }}-script
+          defaultMode: 0755

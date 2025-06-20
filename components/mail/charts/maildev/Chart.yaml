@@ -1,6 +1,0 @@
-apiVersion: v2
-name: maildev
-description: A Helm chart for MailDev SMTP server for development
-type: application
-version: 0.1.0
-appVersion: "2.1.0"

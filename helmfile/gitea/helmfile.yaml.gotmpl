@@ -69,5 +69,27 @@ releases:
               valkey: 6379
 
   - name: gitea-runner
-    namespace: gitea-runner
+    namespace: gitea
     chart: ./charts/gitea-runner
+    needs:
+      - gitea
+
+  - name: gitea-org-creator
+    namespace: gitea
+    chart: ./charts/gitea-org-creator
+    needs:
+      - gitea
+    values:
+      - organization:
+          name: "zengarden-space"
+          description: "ZenGarden Space Organization"
+          website: "https://zengarden.space"
+          visibility: "public"
+        gitea:
+          service:
+            name: "gitea-http"
+            namespace: "gitea"
+            port: 3000
+          admin:
+            username: "gitea_admin"
+            password: {{ .Values.gitea.password | quote }}

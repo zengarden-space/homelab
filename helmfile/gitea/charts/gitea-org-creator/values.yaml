@@ -1,0 +1,47 @@
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Organization configuration
+organization:
+  name: "zengarden-space"
+  description: "ZenGarden Space Organization"
+  website: "https://zengarden.space"
+  visibility: "public"
+
+# Gitea configuration
+gitea:
+  service:
+    name: "gitea-http"
+    namespace: "gitea"
+    port: 3000
+  admin:
+    username: "gitea_admin"
+    password: ""  # Admin password - will be provided via values
+
+# Job configuration
+job:
+  image:
+    repository: "curlimages/curl"
+    tag: "8.10.1"
+    pullPolicy: IfNotPresent
+  
+  restartPolicy: Never
+  backoffLimit: 3
+  
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
