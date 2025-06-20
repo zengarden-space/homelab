@@ -1,8 +1,0 @@
-users:
-  admin:
-    displayname: "Admin User"
-    password: "$argon2id$v=19$m=65536,t=3,p=4$CgF97vA/G1t/NEFfdGcmGQ$ymkpiWOZa7hn05mSfJznVxHQrMo9TyNvz7hUo4rK0us"
-    email: admin@{{ .Values.authelia.domain }}
-    groups:
-      - admins
-      - dev

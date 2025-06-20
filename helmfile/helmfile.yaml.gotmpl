@@ -1,3 +1,8 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
 repositories:
   # Add all repositories used in the helm scripts
   - name: metallb
@@ -28,6 +33,14 @@ releases:
     namespace: metallb-system
     chart: metallb/metallb
     version: 0.14.5
+
+  - name: ip-ranges
+    namespace: metallb-system
+    chart: charts/ip-ranges
+    needs:
+      - metallb
+    values:
+      - ipRange: {{ .Values.loadBalancing.ipRange | quote }}
 
   - name: cert-manager
     namespace: cert-manager
@@ -93,9 +106,29 @@ releases:
     needs:
       - trust-manager
       
+  - name: letsencrypt-prod
+    namespace: cert-manager
+    chart: charts/letsencrypt-prod
+    needs:
+      - cert-manager
+    values:
+      - cloudflareToken: {{ .Values.letsEncrypt.cloudflareToken | quote }}
+        cloudflareAccount: {{ .Values.letsEncrypt.cloudflareAccount | quote }}
+
+  - name: mikrotik-creds
+    namespace: external-dns
+    chart: charts/mikrotik-creds
+    values:
+      - mikrotik:
+          baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
+          username: {{ .Values.externalDns.mikrotikUsername | quote }}
+          password: {{ .Values.externalDns.mikrotikPassword | quote }}
+
   - name: external-dns
     namespace: external-dns
     chart: external-dns/external-dns
+    needs:
+     - mikrotik-creds
     version: 1.15.0
     values:
       - interval: 5s
@@ -187,10 +220,16 @@ releases:
         tcp:
           "22": "gitea/gitea-ssh:22"
 
+  - name: authelia-config
+    namespace: authelia
+    chart: ./charts/authelia-config
+
   - name: authelia
     namespace: authelia
     chart: authelia/authelia
     version: 0.9.3
+    needs:
+      - authelia-config
     values:
       - ingress:
           enabled: true
@@ -201,13 +240,13 @@ releases:
             enabled: true
             secret: authelia-tls
           rulesOverride:
-            - host: auth.zengarden.space
+            - host: auth.{{ .Values.authelia.domain }}
               path: /
         configMap:
           session:
             cookies:
-              - domain: zengarden.space
-                default_redirection_url: https://www.auth.zengarden.space
+              - domain: {{ .Values.authelia.domain | quote }}
+                default_redirection_url: https://www.{{ .Values.authelia.domain }}
             redis:
               enabled: true
               deploy: true
@@ -232,7 +271,7 @@ releases:
             smtp:
               enabled: true
               address: smtp://smtp.gmail.com:587
-              sender: Authelia <noreply@zengarden.space>
+              sender: Authelia <noreply@{{ .Values.authelia.domain }}>
               username: your-email@gmail.com
         secret:
           additionalSecrets:
@@ -321,17 +360,9 @@ releases:
     chart: oci://registry-1.docker.io/bitnamicharts/node-exporter
     version: 4.5.13
 
-  - name: argocd-config
-    namespace: argocd
-    chart: charts/argocd-config
-    needs:
-      - external-secrets
-
   - name: argocd
     namespace: argocd
     chart: argo/argo-cd
-    needs:
-      - argocd-config
     values:
       - createAggregateRoles: true
 
@@ -345,7 +376,7 @@ releases:
           replicas: 1
 
         secret:
-          createSecret: false
+          githubSecret: {{ .Values.argocd.webhookSecret }}
 
         server:
           autoscaling:
@@ -381,7 +412,7 @@ releases:
       - replicaCount: 1
         gitea:
           admin:
-            password: "MAKE EXTERNAL SECRET"
+            password: {{ .Values.gitea.password | quote }}
           actions:
             enabled: true
         persistence:
