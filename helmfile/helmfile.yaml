@@ -11,7 +11,8 @@ helmfiles:
   
   # Authentication & Security
   - path: authelia/helmfile.yaml.gotmpl
-  
+  - path: mail/helmfile.yaml.gotmpl
+
   # Monitoring
   - path: victoria-metrics/helmfile.yaml.gotmpl
   

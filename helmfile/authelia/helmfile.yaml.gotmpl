@@ -19,7 +19,7 @@ releases:
   - name: authelia
     namespace: authelia
     chart: authelia/authelia
-    version: 0.9.3
+    version: 0.10.17
     needs:
       - authelia-config
     values:
@@ -59,18 +59,20 @@ releases:
               password:
                 value: authelia
           notifier:
-            disable_startup_check: true
             smtp:
               enabled: true
-              address: smtp://smtp.gmail.com:587
-              sender: Authelia <noreply@zengarden.space>
-              username: your-email@gmail.com
+              address: smtp://smtp.zengarden.space
+              sender: authentication bot <noreply@zengarden.space>
         secret:
           additionalSecrets:
             authelia-users:
               items:
                 - key: users_database.yml
                   path: users_database.yml
+        totp:
+          issuer: 'auth.zengarden.space'
+        webauthn:
+          display_name: 'auth.zengarden.space'
         pod:
           kind: Deployment
           strategy:
@@ -83,10 +85,9 @@ releases:
               fsGroup: 1000
               seccompProfile:
                 type: RuntimeDefault
-            pod:
-              allowPrivilegeEscalation: false
               capabilities:
                 drop:
                   - ALL
+              allowPrivilegeEscalation: false
         persistence:
           enabled: false
