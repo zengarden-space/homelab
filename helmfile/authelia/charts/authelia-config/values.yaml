@@ -1,0 +1,8 @@
+users:
+  admin:
+    displayname: "Admin User"
+    password:
+    email: admin@zengarden.space
+    groups:
+      - admins
+      - dev

@@ -6,6 +6,10 @@ releases:
   - name: authelia-config
     namespace: authelia
     chart: ./charts/authelia-config
+    values:
+     - users:
+         admin:
+           password: {{ .Values.adminPassword }}
 
   - name: authelia
     namespace: authelia
