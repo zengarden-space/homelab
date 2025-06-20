@@ -1,0 +1,72 @@
+{{- if .Values.personalAccessTokens.enabled }}
+{{- range $tokenName, $tokenConfig := .Values.personalAccessTokens.tokens }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gitea-org-creator.fullname" $ }}-token-{{ $tokenName }}-{{ $tokenConfig.scopes | sha1sum | trunc 7 }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gitea-org-creator.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: pat-generator
+spec:
+  backoffLimit: {{ $.Values.job.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "gitea-org-creator.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: pat-generator
+    spec:
+      restartPolicy: {{ $.Values.job.restartPolicy }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: pat-generator
+        image: bitnami/kubectl:1.33.1
+        imagePullPolicy: {{ $.Values.job.image.pullPolicy }}
+        securityContext:
+          {{- toYaml $.Values.job.securityContext | nindent 10 }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+
+          echo "Waiting for Gitea pods to be ready..."
+          kubectl wait --for=condition=ready pod -l app=gitea -n gitea --timeout=300s
+          echo "Gitea pods are ready"
+          
+          echo "Finding a running Gitea pod in gitea namespace..."
+          GITEA_POD=$(kubectl get pods -n gitea -l app=gitea -o jsonpath='{.items[0].metadata.name}')
+          
+          if [ -z "$GITEA_POD" ]; then
+            echo "Error: No Gitea pod found"
+            exit 1
+          fi
+
+          # Execute gitea command inside gitea container to generate token
+          TOKEN=$(kubectl exec -n {{ $.Values.gitea.service.namespace }} $GITEA_POD -- \
+            gitea admin user generate-access-token \
+            --username {{ $tokenConfig.user }} \
+            --token-name {{ $tokenName }} \
+            --scopes {{ $tokenConfig.scopes | quote }} \
+            --raw)
+          
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to generate token"
+            exit 1
+          fi
+          
+          echo "Token generated successfully. Creating secret..."
+          
+          # Create or update the secret
+          kubectl create secret generic {{ $tokenName }} \
+            --from-literal=token="$TOKEN" \
+            --from-literal=scopes="{{ $tokenConfig.scopes }}" \
+            --from-literal=user="{{ $tokenConfig.user }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "Secret {{ $tokenName }} created/updated successfully"
+      serviceAccountName: {{ include "gitea-org-creator.fullname" $ }}-pat-generator
+{{- end }}
+{{- end }}

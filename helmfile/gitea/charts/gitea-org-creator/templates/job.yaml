@@ -5,10 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "gitea-org-creator.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    app.kubernetes.io/component: org-creator
 spec:
   backoffLimit: {{ .Values.job.backoffLimit }}
   template:
@@ -57,6 +54,11 @@ spec:
             secretKeyRef:
               name: {{ include "gitea-org-creator.fullname" . }}-admin
               key: password
+        - name: GITEA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: org-creator
+              key: token
         volumeMounts:
         - name: script-volume
           mountPath: /scripts

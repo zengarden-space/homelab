@@ -93,3 +93,8 @@ releases:
           admin:
             username: "gitea_admin"
             password: {{ .Values.gitea.password | quote }}
+        personalAccessTokens:
+          tokens:
+            org-creator:
+              user: gitea_admin
+              scopes: "write:organization"

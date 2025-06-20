@@ -30,10 +30,10 @@ fi
 
 # Check if organization already exists
 echo "Checking if organization '${ORG_NAME}' already exists..."
-if curl -sf -u "${GITEA_ADMIN_USERNAME}:${GITEA_ADMIN_PASSWORD}" "${API_ENDPOINT}/${ORG_NAME}" > /dev/null 2>&1; then
+if curl -sf -H "Authorization: token ${GITEA_TOKEN}" "${API_ENDPOINT}/${ORG_NAME}" > /dev/null 2>&1; then
     echo "✅ Organization '${ORG_NAME}' already exists"
     echo "Getting organization details..."
-    curl -s -u "${GITEA_ADMIN_USERNAME}:${GITEA_ADMIN_PASSWORD}" "${API_ENDPOINT}/${ORG_NAME}"
+    curl -s -H "Authorization: token ${GITEA_TOKEN}" "${API_ENDPOINT}/${ORG_NAME}"
     exit 0
 fi
 
@@ -58,7 +58,7 @@ echo "${ORG_PAYLOAD}"
 echo "Sending API request to create organization..."
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
     -H "Content-Type: application/json" \
-    -u "${GITEA_ADMIN_USERNAME}:${GITEA_ADMIN_PASSWORD}" \
+    -H "Authorization: token ${GITEA_TOKEN}" \
     -d "${ORG_PAYLOAD}" \
     "${API_ENDPOINT}")
 
@@ -78,7 +78,7 @@ case ${HTTP_CODE} in
     409)
         echo "ℹ️  Organization '${ORG_NAME}' already exists"
         echo "Getting existing organization details..."
-        curl -s -u "${GITEA_ADMIN_USERNAME}:${GITEA_ADMIN_PASSWORD}" "${API_ENDPOINT}/${ORG_NAME}"
+        curl -s -H "Authorization: token ${GITEA_TOKEN}" "${API_ENDPOINT}/${ORG_NAME}"
         ;;
     422)
         echo "❌ Error: Invalid organization data"

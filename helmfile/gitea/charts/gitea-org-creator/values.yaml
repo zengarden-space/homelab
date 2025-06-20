@@ -16,9 +16,14 @@ gitea:
     namespace: "gitea"
     port: 3000
   admin:
-    username: "gitea_admin"
+    username: ""
     password: ""  # Admin password - will be provided via values
 
+# Personal Access Tokens configuration
+personalAccessTokens:
+  enabled: true
+  tokens: {}
+      
 # Job configuration
 job:
   image:
