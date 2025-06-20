@@ -1,0 +1,73 @@
+environments:
+  default:
+    values:
+      - env.yaml
+
+repositories:
+  - name: gitea
+    url: https://dl.gitea.io/charts
+
+releases:
+  - name: gitea
+    namespace: gitea
+    chart: gitea/gitea
+    version: 11.0.0
+    values:
+      - replicaCount: 1
+        gitea:
+          admin:
+            password: {{ .Values.gitea.password | quote }}
+          actions:
+            enabled: true
+        persistence:
+          enabled: true
+          size: 50Gi
+        metrics:
+          enabled: true
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        podSecurityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        ingress:
+          enabled: true
+          className: nginx
+          hosts:
+            - host: gitea.zengarden.space
+              paths:
+                - path: /
+                  pathType: Prefix
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: 500m
+          tls:
+            - hosts:
+                - gitea.zengarden.space
+              secretName: gitea-tls
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 0
+            maxUnavailable: 1
+        deployment:
+          env:
+            - name: GITEA__ACTIONS__ENABLED
+              value: "true"
+            - name: GITEA__WEBHOOK_ALLOWED_HOST_LIST
+              value: "*"
+        postgresql-ha:
+          service:
+            ports:
+              postgresql: 5432
+        valkey-cluster:
+          service:
+            ports:
+              valkey: 6379
+
+  - name: gitea-runner
+    namespace: gitea-runner
+    chart: ../../helmfile/charts/gitea-runner

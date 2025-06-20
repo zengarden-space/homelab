@@ -1,5 +1,1 @@
-.idea
-*.iml
-
-# Environment files with sensitive data
-linux-installer/.env
+env.yaml

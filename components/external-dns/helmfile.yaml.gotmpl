@@ -1,0 +1,103 @@
+environments:
+  default:
+    values:
+      - env.yaml
+
+repositories:
+  - name: external-dns
+    url: https://kubernetes-sigs.github.io/external-dns/
+
+releases:
+  - name: mikrotik-creds
+    namespace: external-dns
+    chart: ../../helmfile/charts/mikrotik-creds
+    values:
+      - mikrotik:
+          baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
+          username: {{ .Values.externalDns.mikrotikUsername | quote }}
+          password: {{ .Values.externalDns.mikrotikPassword | quote }}
+
+  - name: external-dns
+    namespace: external-dns
+    chart: external-dns/external-dns
+    needs:
+     - mikrotik-creds
+    version: 1.15.0
+    values:
+      - interval: 5s
+        sources:
+          - ingress
+          - service
+          - crd
+        domainFilters:
+          - zengarden.space
+        provider:
+          name: webhook
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          webhook:
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              seccompProfile:
+                type: RuntimeDefault
+            image:
+              repository: "ghcr.io/mirceanton/external-dns-provider-mikrotik"
+              tag: "v1.4.4@sha256:d51055ef8f9311373e0b16057b34dbbb393a8f29248431f4ddd9279a417f602d"
+              pullPolicy: IfNotPresent
+            env:
+              - name: LOG_FORMAT
+                value: json
+              - name: LOG_LEVEL
+                value: debug
+              - name: MIKROTIK_DEFAULT_TTL
+                value: "1800"
+              - name: MIKROTIK_DEFAULT_COMMENT
+                value: Managed by ExternalDNS
+              - name: MIKROTIK_BASEURL
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_BASEURL
+              - name: MIKROTIK_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_USERNAME
+              - name: MIKROTIK_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_PASSWORD
+              - name: MIKROTIK_SKIP_TLS_VERIFY
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-credentials
+                    key: MIKROTIK_SKIP_TLS_VERIFY
+            livenessProbe:
+              httpGet:
+                path: /healthz
+                port: http-webhook
+              initialDelaySeconds: 10
+              timeoutSeconds: 5
+            readinessProbe:
+              httpGet:
+                path: /readyz
+                port: http-webhook
+              initialDelaySeconds: 10
+              timeoutSeconds: 5
+        extraArgs:
+          - --ignore-ingress-tls-spec
+          - --managed-record-types=A
+          - --managed-record-types=AAAA
+          - --managed-record-types=CNAME
+          - --managed-record-types=TXT
+          - --managed-record-types=MX
+          - --managed-record-types=SRV
+          - --managed-record-types=NS

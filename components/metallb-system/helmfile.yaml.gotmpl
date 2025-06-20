@@ -1,0 +1,22 @@
+environments:
+  default:
+    values:
+      - env.yaml
+
+repositories:
+  - name: metallb
+    url: https://metallb.github.io/metallb
+
+releases:
+  - name: metallb
+    namespace: metallb-system
+    chart: metallb/metallb
+    version: 0.14.5
+
+  - name: ip-ranges
+    namespace: metallb-system
+    chart: ../../helmfile/charts/ip-ranges
+    needs:
+      - metallb
+    values:
+      - ipRange: 192.168.88.200-192.168.88.254

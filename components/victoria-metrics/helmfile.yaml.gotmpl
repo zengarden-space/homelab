@@ -1,0 +1,25 @@
+environments:
+  default: {}
+
+repositories: []
+
+releases:
+  - name: vm
+    namespace: victoria-metrics
+    chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
+    version: 0.48.1
+    values:
+      - grafana:
+          ingress:
+            enabled: true
+            hosts:
+              - grafana.zengarden.space
+            annotations:
+              kubernetes.io/ingress.class: nginx
+              cert-manager.io/cluster-issuer: "letsencrypt-prod"
+            tls:
+              - secretName: grafana-tls
+                hosts:
+                  - grafana.zengarden.space
+        prometheus-node-exporter:
+          hostNetwork: false

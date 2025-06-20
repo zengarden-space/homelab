@@ -1,0 +1,53 @@
+environments:
+  default:
+    values:
+      - env.yaml
+
+repositories:
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+releases:
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    values:
+      - createAggregateRoles: true
+
+        global:
+          domain: argocd.zengarden.space
+
+        redis-ha:
+          enabled: true
+
+        controller:
+          replicas: 1
+
+        secret:
+          githubSecret: {{ .Values.argocd.webhookSecret }}
+
+        server:
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+            extraTls:
+              - hosts:
+                  - argocd.zengarden.space
+                secretName: argocd-tls
+
+        repoServer:
+          autoscaling:
+            enabled: true
+            minReplicas: 2
+
+        applicationSet:
+          replicas: 2
+
+        configs:
+          params:
+            server.insecure: true

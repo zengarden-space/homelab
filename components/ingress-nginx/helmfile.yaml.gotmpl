@@ -1,0 +1,18 @@
+environments:
+  default: {}
+
+repositories:
+  - name: ingress-nginx
+    url: https://kubernetes.github.io/ingress-nginx
+
+releases:
+  - name: ingress-nginx
+    namespace: ingress-nginx
+    chart: ingress-nginx/ingress-nginx
+    values:
+      - controller:
+          progressDeadlineSeconds: 10
+          networkPolicy:
+            enabled: true
+        tcp:
+          "22": "gitea/gitea-ssh:22"
