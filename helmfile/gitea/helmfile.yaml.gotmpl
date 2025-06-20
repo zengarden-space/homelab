@@ -2,7 +2,7 @@ environments:
   default:
     values:
       - env.yaml
-
+---
 repositories:
   - name: gitea
     url: https://dl.gitea.io/charts
@@ -67,3 +67,7 @@ releases:
           service:
             ports:
               valkey: 6379
+
+  - name: gitea-runner
+    namespace: gitea-runner
+    chart: ./charts/gitea-runner

@@ -1,6 +1,3 @@
-environments:
-  default: {}
-
 helmfiles:
   # Core infrastructure
   - path: metallb-system/helmfile.yaml.gotmpl
@@ -17,7 +14,6 @@ helmfiles:
   
   # Monitoring
   - path: victoria-metrics/helmfile.yaml.gotmpl
-  - path: node-exporter/helmfile.yaml.gotmpl
   
   # GitOps & CI/CD
   - path: argocd/helmfile.yaml.gotmpl
