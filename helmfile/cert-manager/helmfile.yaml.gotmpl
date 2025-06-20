@@ -2,7 +2,7 @@ environments:
   default:
     values:
       - env.yaml
-
+---
 repositories:
   - name: jetstack
     url: https://charts.jetstack.io
@@ -32,13 +32,13 @@ releases:
 
   - name: internal-ca
     namespace: cert-manager
-    chart: ../../helmfile/charts/internal-ca
+    chart: ./charts/internal-ca
     needs:
       - trust-manager
       
   - name: letsencrypt-prod
     namespace: cert-manager
-    chart: ../../helmfile/charts/letsencrypt-prod
+    chart: ./charts/letsencrypt-prod
     needs:
       - cert-manager
     values:

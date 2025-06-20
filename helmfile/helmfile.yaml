@@ -1,0 +1,24 @@
+environments:
+  default: {}
+
+helmfiles:
+  # Core infrastructure
+  - path: metallb-system/helmfile.yaml.gotmpl
+  - path: cert-manager/helmfile.yaml.gotmpl
+  - path: external-secrets-system/helmfile.yaml.gotmpl
+  
+  # Networking
+  - path: external-dns/helmfile.yaml.gotmpl
+  - path: ingress-nginx/helmfile.yaml.gotmpl
+  - path: external-tunnel/helmfile.yaml.gotmpl
+  
+  # Authentication & Security
+  - path: authelia/helmfile.yaml.gotmpl
+  
+  # Monitoring
+  - path: victoria-metrics/helmfile.yaml.gotmpl
+  - path: node-exporter/helmfile.yaml.gotmpl
+  
+  # GitOps & CI/CD
+  - path: argocd/helmfile.yaml.gotmpl
+  - path: gitea/helmfile.yaml.gotmpl

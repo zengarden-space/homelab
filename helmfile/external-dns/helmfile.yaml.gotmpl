@@ -2,7 +2,7 @@ environments:
   default:
     values:
       - env.yaml
-
+---
 repositories:
   - name: external-dns
     url: https://kubernetes-sigs.github.io/external-dns/
@@ -10,7 +10,7 @@ repositories:
 releases:
   - name: mikrotik-creds
     namespace: external-dns
-    chart: ../../helmfile/charts/mikrotik-creds
+    chart: ./charts/mikrotik-creds
     values:
       - mikrotik:
           baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
