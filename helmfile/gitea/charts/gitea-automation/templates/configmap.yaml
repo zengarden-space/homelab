@@ -6,5 +6,5 @@ metadata:
   labels:
     {{- include "gitea-automation.labels" . | nindent 4 }}
 data:
-  create-org.sh: |
-{{ .Files.Get "files/create-org.sh" | indent 4 }}
+  sync.sh: |
+{{ .Files.Get "files/sync.sh" | indent 4 }}

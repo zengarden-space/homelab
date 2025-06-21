@@ -19,6 +19,11 @@ gitea:
     username: ""
     password: ""  # Admin password - will be provided via values
 
+# GitHub configuration for sync
+github:
+  token: ""  # GitHub token - will be provided via values
+  organization: "zengarden-space"
+
 # Personal Access Tokens configuration
 personalAccessTokens:
   enabled: true
@@ -27,9 +32,7 @@ personalAccessTokens:
 # Job configuration
 job:
   image:
-    repository: "curlimages/curl"
-    tag: "8.10.1"
-    pullPolicy: IfNotPresent
+    pullPolicy: IfNotPresent  # Used for both main and init containers
   
   restartPolicy: Never
   backoffLimit: 3

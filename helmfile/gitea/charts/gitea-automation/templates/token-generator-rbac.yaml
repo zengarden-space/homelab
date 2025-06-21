@@ -19,10 +19,10 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["create", "update", "patch", "get", "list"]
+  verbs: ["create", "update", "patch", "get", "list", "delete"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["create"]

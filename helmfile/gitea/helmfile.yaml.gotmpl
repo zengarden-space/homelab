@@ -93,6 +93,9 @@ releases:
           admin:
             username: "gitea_admin"
             password: {{ .Values.gitea.password | quote }}
+        github:
+          token: {{ .Values.github.token | quote }}
+          organization: "zengarden-space"
         personalAccessTokens:
           tokens:
             org-creator:
