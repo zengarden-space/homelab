@@ -21,4 +21,4 @@ applicationSet:
         - CreateNamespace=true
     
     # Destination cluster
-    destinationServer: '{{.url}}'
+    destinationServer: https://kubernetes.default.svc
