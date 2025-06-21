@@ -86,7 +86,6 @@ fi
 
 # Function to get repositories from GitHub
 get_github_repos() {
-    echo "Getting GitHub repositories..."
     curl -sf -H "Authorization: token ${GITHUB_TOKEN}" \
         -H "Accept: application/vnd.github.v3+json" \
         "${GITHUB_API}/orgs/${GITHUB_ORG}/repos?type=all&per_page=100" | \
@@ -95,7 +94,6 @@ get_github_repos() {
 
 # Function to get repositories from Gitea
 get_gitea_repos() {
-    echo "Getting Gitea repositories..."
     curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
         "${GITEA_API}/orgs/${ORG_NAME}/repos?limit=100" | \
         jq -r '.[].name' 2>/dev/null || echo ""
@@ -119,35 +117,62 @@ create_github_repo() {
 EOF
 )
     
-    curl -sf -X POST \
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Authorization: token ${GITHUB_TOKEN}" \
         -H "Accept: application/vnd.github.v3+json" \
         -H "Content-Type: application/json" \
         -d "${REPO_PAYLOAD}" \
-        "${GITHUB_API}/orgs/${GITHUB_ORG}/repos" > /dev/null
+        "${GITHUB_API}/orgs/${GITHUB_ORG}/repos")
+    
+    HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
+    if [ "${HTTP_CODE}" = "201" ]; then
+        return 0
+    else
+        echo "GitHub API Error (HTTP ${HTTP_CODE}): $(echo "${RESPONSE}" | head -n -1)"
+        return 1
+    fi
 }
 
-# Function to create repository in Gitea
+# Function to create repository in Gitea via migration from GitHub
 create_gitea_repo() {
     local repo_name="$1"
     local description="$2"
-    echo "Creating Gitea repository: ${repo_name}"
+    echo "Migrating GitHub repository '${repo_name}' to Gitea..."
     
     REPO_PAYLOAD=$(cat <<EOF
 {
-    "name": "${repo_name}",
-    "description": "${description}",
+    "clone_addr": "https://github.com/${GITHUB_ORG}/${repo_name}.git",
+    "auth_username": "",
+    "auth_password": "${GITHUB_TOKEN}",
+    "uid": 0,
+    "repo_owner": "${ORG_NAME}",
+    "repo_name": "${repo_name}",
+    "mirror": false,
     "private": false,
-    "auto_init": true
+    "description": "${description}",
+    "issues": false,
+    "labels": false,
+    "milestones": false,
+    "pull_requests": false,
+    "releases": false,
+    "wiki": false
 }
 EOF
 )
     
-    curl -sf -X POST \
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Authorization: token ${GITEA_TOKEN}" \
         -H "Content-Type: application/json" \
         -d "${REPO_PAYLOAD}" \
-        "${GITEA_API}/org/${ORG_NAME}/repos" > /dev/null
+        "${GITEA_API}/repos/migrate")
+    
+    HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
+    if [ "${HTTP_CODE}" = "201" ]; then
+        echo "✅ Successfully migrated repository to organization"
+    else
+        echo "Gitea Migration Error (HTTP ${HTTP_CODE}): $(echo "${RESPONSE}" | head -n -1)"
+        return 1
+    fi
 }
 
 # Function to get repository description from GitHub
@@ -179,18 +204,28 @@ echo "✅ GitHub API access confirmed"
 
 # Get repositories from both platforms
 echo "Enumerating repositories..."
+echo "Getting GitHub repositories..."
 GITHUB_REPOS=$(get_github_repos)
+echo "Getting Gitea repositories..."
 GITEA_REPOS=$(get_gitea_repos)
 
 echo "GitHub repositories:"
-echo "${GITHUB_REPOS}" | sed 's/^/  - /'
+if [ -n "${GITHUB_REPOS}" ]; then
+    echo "${GITHUB_REPOS}" | sed 's/^/  - /'
+else
+    echo "  (none)"
+fi
 echo ""
 echo "Gitea repositories:"
-echo "${GITEA_REPOS}" | sed 's/^/  - /'
+if [ -n "${GITEA_REPOS}" ]; then
+    echo "${GITEA_REPOS}" | sed 's/^/  - /'
+else
+    echo "  (none)"
+fi
 echo ""
 
 # Sync repositories from GitHub to Gitea
-echo "=== Syncing from GitHub to Gitea ==="
+echo "=== Migrating repositories from GitHub to Gitea ==="
 for repo in ${GITHUB_REPOS}; do
     if [ -z "$repo" ]; then
         continue
@@ -199,12 +234,12 @@ for repo in ${GITHUB_REPOS}; do
     if echo "${GITEA_REPOS}" | grep -q "^${repo}$"; then
         echo "✅ Repository '${repo}' already exists in Gitea"
     else
-        echo "➡️  Creating '${repo}' in Gitea..."
+        echo "➡️  Migrating '${repo}' from GitHub to Gitea..."
         description=$(get_github_repo_description "${repo}")
         if create_gitea_repo "${repo}" "${description}"; then
-            echo "✅ Successfully created '${repo}' in Gitea"
+            echo "✅ Successfully migrated '${repo}' to Gitea"
         else
-            echo "❌ Failed to create '${repo}' in Gitea"
+            echo "❌ Failed to migrate '${repo}' to Gitea"
         fi
     fi
 done
