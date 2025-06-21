@@ -266,4 +266,66 @@ for repo in ${GITEA_REPOS}; do
 done
 
 echo ""
+echo "=== Setting up push mirrors from Gitea to GitHub ==="
+# Get updated Gitea repositories list after migration
+GITEA_REPOS_UPDATED=$(get_gitea_repos)
+
+for repo in ${GITEA_REPOS_UPDATED}; do
+    if [ -z "$repo" ]; then
+        continue
+    fi
+    
+    echo "Checking push mirror for repository '${repo}'..."
+    
+    # Check if push mirror already exists
+    MIRRORS_RESPONSE=$(curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
+        "${GITEA_API}/repos/${ORG_NAME}/${repo}/push_mirrors" 2>/dev/null || echo "[]")
+    
+    GITHUB_MIRROR_EXISTS=$(echo "${MIRRORS_RESPONSE}" | jq -r ".[] | select(.remote_address | contains(\"github.com/${GITHUB_ORG}/${repo}\")) | .remote_address" 2>/dev/null || echo "")
+    
+    if [ -n "${GITHUB_MIRROR_EXISTS}" ]; then
+        echo "✅ Push mirror already exists for '${repo}' to GitHub"
+    else
+        echo "➡️  Setting up push mirror for '${repo}' to GitHub..."
+        
+        MIRROR_PAYLOAD=$(cat <<EOF
+{
+    "remote_address": "https://github.com/${GITHUB_ORG}/${repo}.git",
+    "remote_username": "oauth2",
+    "remote_password": "${GITHUB_TOKEN}",
+    "sync_on_commit": true,
+    "interval": "8h"
+}
+EOF
+)
+        
+        MIRROR_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${MIRROR_PAYLOAD}" \
+            "${GITEA_API}/repos/${ORG_NAME}/${repo}/push_mirrors")
+        
+        MIRROR_HTTP_CODE=$(echo "${MIRROR_RESPONSE}" | tail -n1)
+        if [ "${MIRROR_HTTP_CODE}" = "200" ] || [ "${MIRROR_HTTP_CODE}" = "201" ]; then
+            echo "✅ Successfully set up push mirror for '${repo}'"
+            
+            # Trigger initial sync
+            echo "Triggering initial mirror sync..."
+            SYNC_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+                -H "Authorization: token ${GITEA_TOKEN}" \
+                "${GITEA_API}/repos/${ORG_NAME}/${repo}/push_mirrors-sync")
+            
+            SYNC_HTTP_CODE=$(echo "${SYNC_RESPONSE}" | tail -n1)
+            if [ "${SYNC_HTTP_CODE}" = "200" ] || [ "${SYNC_HTTP_CODE}" = "202" ]; then
+                echo "✅ Initial mirror sync triggered"
+            else
+                echo "⚠️  Push mirror created but initial sync failed (HTTP ${SYNC_HTTP_CODE})"
+            fi
+        else
+            echo "❌ Failed to set up push mirror for '${repo}' (HTTP ${MIRROR_HTTP_CODE}): $(echo "${MIRROR_RESPONSE}" | head -n -1)"
+        fi
+    fi
+done
+
+echo ""
 echo "=== Sync completed ==="
