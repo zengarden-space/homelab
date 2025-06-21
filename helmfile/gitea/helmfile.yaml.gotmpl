@@ -96,6 +96,8 @@ releases:
         github:
           token: {{ .Values.github.token | quote }}
           organization: "zengarden-space"
+        argocd:
+          webhookSecret: {{ .Values.gitea.argocd.webhookSecret | quote }}
         personalAccessTokens:
           tokens:
             gitea-automation-org-creator:

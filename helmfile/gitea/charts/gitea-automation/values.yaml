@@ -24,6 +24,10 @@ github:
   token: ""  # GitHub token - will be provided via values
   organization: "zengarden-space"
 
+# ArgoCD configuration for webhooks
+argocd:
+  webhookSecret: ""  # ArgoCD webhook secret - will be provided via values
+
 # Personal Access Tokens configuration
 personalAccessTokens:
   enabled: true

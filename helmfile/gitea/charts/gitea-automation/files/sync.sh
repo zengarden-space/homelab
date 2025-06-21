@@ -97,6 +97,66 @@ else
 fi
 
 
+# Function to create organization webhook
+create_org_webhook() {
+    local webhook_url="$1"
+    local webhook_secret="$2"
+    
+    echo "Checking if ArgoCD webhook exists for organization..."
+    
+    # Get existing webhooks
+    WEBHOOKS_RESPONSE=$(curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
+        "${GITEA_API}/orgs/${ORG_NAME}/hooks" 2>/dev/null || echo "[]")
+    
+    # Check if ArgoCD webhook already exists
+    ARGOCD_WEBHOOK_EXISTS=$(echo "${WEBHOOKS_RESPONSE}" | jq -r ".[] | select(.config.url | contains(\"${webhook_url}\")) | .id" 2>/dev/null || echo "")
+    
+    if [ -n "${ARGOCD_WEBHOOK_EXISTS}" ]; then
+        echo "✅ ArgoCD webhook already exists for organization (ID: ${ARGOCD_WEBHOOK_EXISTS})"
+    else
+        echo "➡️  Creating ArgoCD webhook for organization..."
+        
+        WEBHOOK_PAYLOAD=$(cat <<EOF
+{
+    "type": "gitea",
+    "config": {
+        "url": "${webhook_url}/api/webhook",
+        "content_type": "json",
+        "secret": "${webhook_secret}"
+    },
+    "events": [
+        "push",
+        "pull_request",
+        "create",
+        "delete",
+        "release"
+    ],
+    "active": true
+}
+EOF
+)
+        
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${WEBHOOK_PAYLOAD}" \
+            "${GITEA_API}/orgs/${ORG_NAME}/hooks")
+        
+        HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
+        if [ "${HTTP_CODE}" = "201" ]; then
+            WEBHOOK_ID=$(echo "${RESPONSE}" | head -n -1 | jq -r '.id')
+            echo "✅ ArgoCD webhook created successfully (ID: ${WEBHOOK_ID})"
+        else
+            echo "❌ Failed to create ArgoCD webhook (HTTP ${HTTP_CODE})"
+            echo "${RESPONSE}" | head -n -1
+            # Don't exit on webhook failure, continue with sync
+        fi
+    fi
+}
+
+# Create ArgoCD webhook
+create_org_webhook "http://argocd.zengarden.space" "${ARGOCD_WEBHOOK_SECRET}"
+
 # Function to create organization secret
 create_org_secret() {
     local secret_name="$1"

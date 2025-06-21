@@ -68,6 +68,11 @@ spec:
             secretKeyRef:
               name: {{ include "gitea-automation.fullname" . }}-content-writer
               key: token
+        - name: ARGOCD_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-argocd
+              key: webhookSecret
         - name: GITHUB_ORG
           value: {{ .Values.github.organization | quote }}
         - name: POD_NAMESPACE
