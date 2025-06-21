@@ -20,18 +20,9 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-      - name: jq-copy
-        image: "ghcr.io/jqlang/jq:1.8.0"
-        command: ['cp', '/usr/local/bin/jq', '/shared/jq']
-        volumeMounts:
-        - name: shared-tools
-          mountPath: /shared
-        securityContext:
-          {{- toYaml .Values.job.securityContext | nindent 10 }}
       containers:
       - name: sync
-        image: "alpine/curl:8.10.1"
+        image: "alpine/curl:8.14.1"
         imagePullPolicy: {{ .Values.job.image.pullPolicy }}
         command: ['/bin/sh']
         args: ['/scripts/sync.sh']
@@ -73,9 +64,6 @@ spec:
         - name: script-volume
           mountPath: /scripts
           readOnly: true
-        - name: shared-tools
-          mountPath: /shared
-          readOnly: true
         securityContext:
           {{- toYaml .Values.job.securityContext | nindent 10 }}
         resources:
@@ -90,5 +78,3 @@ spec:
         configMap:
           name: {{ include "gitea-automation.fullname" . }}-script
           defaultMode: 0755
-      - name: shared-tools
-        emptyDir: {}

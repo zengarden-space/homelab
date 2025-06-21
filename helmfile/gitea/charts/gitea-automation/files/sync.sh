@@ -5,15 +5,23 @@ echo "=== Gitea-GitHub Two-Way Sync Script ==="
 echo "Organization: ${ORG_NAME}"
 echo "GitHub Org: ${GITHUB_ORG}"
 
-# Make jq available in PATH
-export PATH="/shared:${PATH}"
-
-# Verify jq is available
+# Download jq if not available
 if ! command -v jq > /dev/null 2>&1; then
-    echo "❌ Error: jq is not available in /shared"
+    echo "Downloading jq..."
+    JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.8.0/jq-linux-arm64"
+    curl -L -o /tmp/jq "${JQ_URL}"
+    chmod +x /tmp/jq
+    export PATH="/tmp:${PATH}"
+    echo "✅ jq downloaded and available"
+else
+    echo "✅ jq is already available"
+fi
+
+# Verify jq is working
+if ! jq --version > /dev/null 2>&1; then
+    echo "❌ Error: jq is not working properly"
     exit 1
 fi
-echo "✅ jq is available"
 
 
 # API endpoints

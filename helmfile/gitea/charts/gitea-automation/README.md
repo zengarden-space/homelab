@@ -76,10 +76,10 @@ personalAccessTokens:
 
 ## Container Images
 
-The chart uses a multi-container approach for optimal security and functionality:
+The chart uses a single lightweight container:
 - **Main container**: `alpine/curl:8.10.1` - Lightweight Alpine Linux with curl for API calls
-- **Init container**: `ghcr.io/jqlang/jq:1.8.0` - Copies the jq binary for JSON processing
-- This approach avoids installing packages at runtime and keeps the main container minimal
+- The script downloads jq binary directly from GitHub releases for JSON processing
+- This approach avoids complex init containers and package installations
 
 ## Usage
 
