@@ -63,6 +63,11 @@ spec:
             secretKeyRef:
               name: {{ include "gitea-automation.fullname" . }}-package-writer
               key: token
+        - name: CONTENT_WRITE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-content-writer
+              key: token
         - name: GITHUB_ORG
           value: {{ .Values.github.organization | quote }}
         - name: POD_NAMESPACE

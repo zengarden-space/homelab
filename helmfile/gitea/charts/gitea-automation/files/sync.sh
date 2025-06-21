@@ -97,39 +97,47 @@ else
 fi
 
 
-# Check if organization secret already exists
-echo "Checking if PACKAGE_WRITE_TOKEN secret exists for organization..."
-SECRET_EXISTS=$(curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
-    "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/PACKAGE_WRITE_TOKEN" 2>/dev/null && echo "true" || echo "false")
-
-if [ "${SECRET_EXISTS}" = "true" ]; then
-    echo "✅ PACKAGE_WRITE_TOKEN secret already exists for organization"
-else
-    echo "➡️  Creating PACKAGE_WRITE_TOKEN organization secret..."
+# Function to create organization secret
+create_org_secret() {
+    local secret_name="$1"
+    local secret_value="$2"
     
-    # Create organization secret using the package-writer token
-    SECRET_PAYLOAD=$(cat <<EOF
+    echo "Checking if ${secret_name} secret exists for organization..."
+    SECRET_EXISTS=$(curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
+        "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/${secret_name}" 2>/dev/null && echo "true" || echo "false")
+
+    if [ "${SECRET_EXISTS}" = "true" ]; then
+        echo "✅ ${secret_name} secret already exists for organization"
+    else
+        echo "➡️  Creating ${secret_name} organization secret..."
+        
+        SECRET_PAYLOAD=$(cat <<EOF
 {
-    "value": "${PACKAGE_WRITE_TOKEN}"
+    "data": "${secret_value}"
 }
 EOF
 )
-    
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
-        -H "Authorization: token ${GITEA_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "${SECRET_PAYLOAD}" \
-        "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/PACKAGE_WRITE_TOKEN")
-    
-    HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
-    if [ "${HTTP_CODE}" = "201" ] || [ "${HTTP_CODE}" = "204" ]; then
-        echo "✅ PACKAGE_WRITE_TOKEN organization secret created successfully"
-    else
-        echo "❌ Failed to create PACKAGE_WRITE_TOKEN organization secret (HTTP ${HTTP_CODE})"
-        echo "${RESPONSE}" | head -n -1
-        exit 1
+        
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${SECRET_PAYLOAD}" \
+            "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/${secret_name}")
+        
+        HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
+        if [ "${HTTP_CODE}" = "201" ] || [ "${HTTP_CODE}" = "204" ]; then
+            echo "✅ ${secret_name} organization secret created successfully"
+        else
+            echo "❌ Failed to create ${secret_name} organization secret (HTTP ${HTTP_CODE})"
+            echo "${RESPONSE}" | head -n -1
+            exit 1
+        fi
     fi
-fi
+}
+
+# Create organization secrets
+create_org_secret "PACKAGE_WRITE_TOKEN" "${PACKAGE_WRITE_TOKEN}"
+create_org_secret "CONTENT_WRITE_TOKEN" "${CONTENT_WRITE_TOKEN}"
 
 # Function to get repositories from GitHub
 get_github_repos() {
