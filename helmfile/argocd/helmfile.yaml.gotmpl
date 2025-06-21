@@ -51,3 +51,15 @@ releases:
         configs:
           params:
             server.insecure: true
+
+  - name: argocd-config
+    namespace: argocd
+    chart: ./charts/argocd-config
+    needs:
+      - argocd/argocd
+    values:
+      - applicationSet:
+          git:
+            repoURL: https://gitea.zengarden.space/zengarden-space/manifests.git
+            revision: main
+            manifestsPath: manifests/*
