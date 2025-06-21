@@ -26,68 +26,30 @@ spec:
         imagePullPolicy: {{ $.Values.job.image.pullPolicy }}
         securityContext:
           {{- toYaml $.Values.job.securityContext | nindent 10 }}
-        command:
-        - /bin/bash
-        - -c
-        - |
-          set -euo pipefail
-          
-          echo "Waiting for Gitea pods to be ready..."
-          kubectl wait --for=condition=ready pod -l app=gitea -n gitea --timeout=300s
-          echo "Gitea pods are ready"
-          
-          echo "Finding a running Gitea pod in gitea namespace..."
-          GITEA_POD=$(kubectl get pods -n gitea -l app=gitea -o jsonpath='{.items[0].metadata.name}')
-          
-          if [ -z "$GITEA_POD" ]; then
-            echo "Error: No Gitea pod found"
-            exit 1
-          fi
-
-          # Check if secret already exists with correct scopes
-          echo "Checking if secret {{ $tokenName }} already exists..."
-          if kubectl get secret {{ $tokenName }} -n {{ $.Release.Namespace }} >/dev/null 2>&1; then
-            echo "Secret {{ $tokenName }} exists. Checking scopes..."
-            EXISTING_SCOPES=$(kubectl get secret {{ $tokenName }} -n {{ $.Release.Namespace }} -o jsonpath='{.data.scopes}' | base64 -d)
-            EXISTING_USER=$(kubectl get secret {{ $tokenName }} -n {{ $.Release.Namespace }} -o jsonpath='{.data.user}' | base64 -d)
-            EXISTING_TOKEN=$(kubectl get secret {{ $tokenName }} -n {{ $.Release.Namespace }} -o jsonpath='{.data.token}' | base64 -d)
-            
-            if [ "$EXISTING_SCOPES" = "{{ $tokenConfig.scopes }}" ] && [ "$EXISTING_USER" = "{{ $tokenConfig.user }}" ] && [ -n "$EXISTING_TOKEN" ]; then
-              echo "✅ Secret {{ $tokenName }} already exists with correct scopes and user. Skipping token generation."
-              exit 0
-            else
-              echo "⚠️  Secret {{ $tokenName }} exists but has different scopes or user. Current: '$EXISTING_SCOPES' for user '$EXISTING_USER', Expected: '{{ $tokenConfig.scopes }}' for user '{{ $tokenConfig.user }}'"
-              echo "Deleting existing secret and regenerating token..."
-              kubectl delete secret {{ $tokenName }} -n {{ $.Release.Namespace }}
-            fi
-          else
-            echo "Secret {{ $tokenName }} does not exist. Will create new token."
-          fi
-
-          # Execute gitea command inside gitea container to generate token
-          echo "Generating new access token..."
-          TOKEN=$(kubectl exec -n {{ $.Values.gitea.service.namespace }} $GITEA_POD -- \
-            gitea admin user generate-access-token \
-            --username {{ $tokenConfig.user }} \
-            --token-name {{ $tokenName }}-{{ $tokenConfig.scopes | sha1sum | trunc 7 }} \
-            --scopes {{ $tokenConfig.scopes | quote }} \
-            --raw)
-          
-          if [ -z "$TOKEN" ]; then
-            echo "❌ Failed to generate token"
-            exit 1
-          fi
-          
-          echo "✅ Token generated successfully. Creating secret..."
-          
-          # Create the secret
-          kubectl create secret generic {{ $tokenName }} \
-            --from-literal=token="$TOKEN" \
-            --from-literal=scopes="{{ $tokenConfig.scopes }}" \
-            --from-literal=user="{{ $tokenConfig.user }}" \
-            -n {{ $.Release.Namespace }}
-          
-          echo "✅ Secret {{ $tokenName }} created successfully"
+        command: ['/bin/bash']
+        args: ['/scripts/token-generator.sh']
+        env:
+        - name: TOKEN_NAME
+          value: {{ $tokenName | quote }}
+        - name: TOKEN_SCOPES
+          value: {{ $tokenConfig.scopes | quote }}
+        - name: TOKEN_USER
+          value: {{ $tokenConfig.user | quote }}
+        - name: TOKEN_SCOPES_HASH
+          value: {{ $tokenConfig.scopes | sha1sum | trunc 7 | quote }}
+        - name: RELEASE_NAMESPACE
+          value: {{ $.Release.Namespace | quote }}
+        - name: GITEA_NAMESPACE
+          value: {{ $.Values.gitea.service.namespace | quote }}
+        volumeMounts:
+        - name: token-generator-volume
+          mountPath: /scripts
+          readOnly: true
+      volumes:
+      - name: token-generator-volume
+        configMap:
+          name: {{ include "gitea-automation.fullname" $ }}-token-generator
+          defaultMode: 0755
       serviceAccountName: {{ include "gitea-automation.fullname" $ }}-pat-generator
 {{- end }}
 {{- end }}

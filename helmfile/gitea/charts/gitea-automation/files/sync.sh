@@ -48,8 +48,16 @@ if ! curl -sf "${GITEA_URL}/api/healthz" > /dev/null 2>&1; then
     exit 1
 fi
 
+# Check if we have a token
+if [ -z "${GITEA_TOKEN:-}" ]; then
+    echo "❌ Error: No Gitea token available"
+    exit 1
+fi
+
 # Ensure organization exists in Gitea
 echo "Ensuring Gitea organization '${ORG_NAME}' exists..."
+ORG_CREATED=false
+
 if ! curl -sf -H "Authorization: token ${GITEA_TOKEN}" "${GITEA_API}/orgs/${ORG_NAME}" > /dev/null 2>&1; then
     echo "Creating Gitea organization '${ORG_NAME}'..."
     ORG_PAYLOAD=$(cat <<EOF
@@ -71,8 +79,12 @@ EOF
     
     HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
     case ${HTTP_CODE} in
-        201|409)
-            echo "✅ Gitea organization ready"
+        201)
+            echo "✅ Gitea organization created successfully"
+            ORG_CREATED=true
+            ;;
+        409)
+            echo "✅ Gitea organization already exists"
             ;;
         *)
             echo "❌ Failed to create Gitea organization (HTTP ${HTTP_CODE})"
@@ -82,6 +94,41 @@ EOF
     esac
 else
     echo "✅ Gitea organization '${ORG_NAME}' already exists"
+fi
+
+
+# Check if organization secret already exists
+echo "Checking if PACKAGE_WRITE_TOKEN secret exists for organization..."
+SECRET_EXISTS=$(curl -sf -H "Authorization: token ${GITEA_TOKEN}" \
+    "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/PACKAGE_WRITE_TOKEN" 2>/dev/null && echo "true" || echo "false")
+
+if [ "${SECRET_EXISTS}" = "true" ]; then
+    echo "✅ PACKAGE_WRITE_TOKEN secret already exists for organization"
+else
+    echo "➡️  Creating PACKAGE_WRITE_TOKEN organization secret..."
+    
+    # Create organization secret using the package-writer token
+    SECRET_PAYLOAD=$(cat <<EOF
+{
+    "value": "${PACKAGE_WRITE_TOKEN}"
+}
+EOF
+)
+    
+    RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+        -H "Authorization: token ${GITEA_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "${SECRET_PAYLOAD}" \
+        "${GITEA_API}/orgs/${ORG_NAME}/actions/secrets/PACKAGE_WRITE_TOKEN")
+    
+    HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
+    if [ "${HTTP_CODE}" = "201" ] || [ "${HTTP_CODE}" = "204" ]; then
+        echo "✅ PACKAGE_WRITE_TOKEN organization secret created successfully"
+    else
+        echo "❌ Failed to create PACKAGE_WRITE_TOKEN organization secret (HTTP ${HTTP_CODE})"
+        echo "${RESPONSE}" | head -n -1
+        exit 1
+    fi
 fi
 
 # Function to get repositories from GitHub

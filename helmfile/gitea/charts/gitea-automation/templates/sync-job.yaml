@@ -47,19 +47,28 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ include "gitea-automation.fullname" . }}-admin
-              key: password
-        - name: GITEA_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: org-creator
-              key: token
+              key: GITEA_ADMIN_PASSWORD
         - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:
               name: {{ include "gitea-automation.fullname" . }}-github
+              key: GITHUB_TOKEN
+        - name: GITEA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-org-creator
+              key: token
+        - name: PACKAGE_WRITE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-package-writer
               key: token
         - name: GITHUB_ORG
           value: {{ .Values.github.organization | quote }}
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         volumeMounts:
         - name: script-volume
           mountPath: /scripts
@@ -76,5 +85,5 @@ spec:
       volumes:
       - name: script-volume
         configMap:
-          name: {{ include "gitea-automation.fullname" . }}-script
+          name: {{ include "gitea-automation.fullname" . }}-sync-script
           defaultMode: 0755

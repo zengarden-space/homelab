@@ -1,0 +1,11 @@
+{{- if .Values.personalAccessTokens.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gitea-automation.fullname" . }}-token-generator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-automation.labels" . | nindent 4 }}
+data:
+  token-generator.sh: {{ .Files.Get "files/token-generator.sh" | quote }}
+{{- end }}
