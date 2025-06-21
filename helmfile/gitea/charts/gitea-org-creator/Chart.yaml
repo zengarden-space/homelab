@@ -1,6 +1,0 @@
-apiVersion: v2
-name: gitea-org-creator
-description: A Helm chart to create organizations in Gitea via API
-type: application
-version: 0.1.0
-appVersion: "1.0"

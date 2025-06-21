@@ -4,17 +4,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "gitea-org-creator.fullname" $ }}-token-{{ $tokenName }}-{{ $tokenConfig.scopes | sha1sum | trunc 7 }}
+  name: {{ include "gitea-automation.fullname" $ }}-token-{{ $tokenName }}-{{ $tokenConfig.scopes | sha1sum | trunc 7 }}
   namespace: {{ $.Release.Namespace }}
   labels:
-    {{- include "gitea-org-creator.labels" $ | nindent 4 }}
+    {{- include "gitea-automation.labels" $ | nindent 4 }}
     app.kubernetes.io/component: pat-generator
 spec:
   backoffLimit: {{ $.Values.job.backoffLimit }}
   template:
     metadata:
       labels:
-        {{- include "gitea-org-creator.selectorLabels" $ | nindent 8 }}
+        {{- include "gitea-automation.selectorLabels" $ | nindent 8 }}
         app.kubernetes.io/component: pat-generator
     spec:
       restartPolicy: {{ $.Values.job.restartPolicy }}
@@ -67,6 +67,6 @@ spec:
             --dry-run=client -o yaml | kubectl apply -f -
           
           echo "Secret {{ $tokenName }} created/updated successfully"
-      serviceAccountName: {{ include "gitea-org-creator.fullname" $ }}-pat-generator
+      serviceAccountName: {{ include "gitea-automation.fullname" $ }}-pat-generator
 {{- end }}
 {{- end }}

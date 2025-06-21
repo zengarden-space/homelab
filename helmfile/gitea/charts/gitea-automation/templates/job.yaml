@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "gitea-org-creator.fullname" . }}
+  name: {{ include "gitea-automation.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gitea-org-creator.labels" . | nindent 4 }}
+    {{- include "gitea-automation.labels" . | nindent 4 }}
     app.kubernetes.io/component: org-creator
 spec:
   backoffLimit: {{ .Values.job.backoffLimit }}
   template:
     metadata:
       labels:
-        {{- include "gitea-org-creator.selectorLabels" . | nindent 8 }}
+        {{- include "gitea-automation.selectorLabels" . | nindent 8 }}
     spec:
       restartPolicy: {{ .Values.job.restartPolicy }}
       {{- if .Values.imagePullSecrets }}
@@ -25,13 +25,7 @@ spec:
         image: "{{ .Values.job.image.repository }}:{{ .Values.job.image.tag }}"
         imagePullPolicy: {{ .Values.job.image.pullPolicy }}
         command: ['/bin/sh']
-        args:
-        - -c
-        - |
-          # Copy script to writable location and execute
-          cp /scripts/create-org.sh /tmp/create-org.sh
-          chmod +x /tmp/create-org.sh
-          /bin/sh /tmp/create-org.sh
+        args: ['/scripts/create-org.sh']
         env:
         - name: ORG_NAME
           value: {{ .Values.organization.name | quote }}
@@ -52,7 +46,7 @@ spec:
         - name: GITEA_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "gitea-org-creator.fullname" . }}-admin
+              name: {{ include "gitea-automation.fullname" . }}-admin
               key: password
         - name: GITEA_TOKEN
           valueFrom:
@@ -75,5 +69,5 @@ spec:
       volumes:
       - name: script-volume
         configMap:
-          name: {{ include "gitea-org-creator.fullname" . }}-script
+          name: {{ include "gitea-automation.fullname" . }}-script
           defaultMode: 0755

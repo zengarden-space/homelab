@@ -2,19 +2,19 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "gitea-org-creator.fullname" . }}-pat-generator
+  name: {{ include "gitea-automation.fullname" . }}-pat-generator
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gitea-org-creator.labels" . | nindent 4 }}
+    {{- include "gitea-automation.labels" . | nindent 4 }}
     app.kubernetes.io/component: pat-generator
 automountServiceAccountToken: true
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "gitea-org-creator.fullname" . }}-pat-generator
+  name: {{ include "gitea-automation.fullname" . }}-pat-generator
   labels:
-    {{- include "gitea-org-creator.labels" . | nindent 4 }}
+    {{- include "gitea-automation.labels" . | nindent 4 }}
     app.kubernetes.io/component: pat-generator
 rules:
 - apiGroups: [""]
@@ -33,16 +33,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "gitea-org-creator.fullname" . }}-pat-generator
+  name: {{ include "gitea-automation.fullname" . }}-pat-generator
   labels:
-    {{- include "gitea-org-creator.labels" . | nindent 4 }}
+    {{- include "gitea-automation.labels" . | nindent 4 }}
     app.kubernetes.io/component: pat-generator
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "gitea-org-creator.fullname" . }}-pat-generator
+  name: {{ include "gitea-automation.fullname" . }}-pat-generator
 subjects:
 - kind: ServiceAccount
-  name: {{ include "gitea-org-creator.fullname" . }}-pat-generator
+  name: {{ include "gitea-automation.fullname" . }}-pat-generator
   namespace: {{ .Release.Namespace }}
 {{- end }}

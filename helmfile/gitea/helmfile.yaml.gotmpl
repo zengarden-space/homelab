@@ -74,9 +74,9 @@ releases:
     needs:
       - gitea
 
-  - name: gitea-org-creator
+  - name: gitea-automation
     namespace: gitea
-    chart: ./charts/gitea-org-creator
+    chart: ./charts/gitea-automation
     needs:
       - gitea
     values:
