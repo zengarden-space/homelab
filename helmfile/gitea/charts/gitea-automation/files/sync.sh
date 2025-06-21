@@ -142,7 +142,7 @@ create_gitea_repo() {
     REPO_PAYLOAD=$(cat <<EOF
 {
     "clone_addr": "https://github.com/${GITHUB_ORG}/${repo_name}.git",
-    "auth_username": "",
+    "auth_username": "oauth2",
     "auth_password": "${GITHUB_TOKEN}",
     "uid": 0,
     "repo_owner": "${ORG_NAME}",
