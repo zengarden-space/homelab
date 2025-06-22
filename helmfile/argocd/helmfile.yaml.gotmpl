@@ -32,7 +32,7 @@ releases:
             minReplicas: 2
           ingress:
             enabled: true
-            ingressClassName: nginx
+            ingressClassName: internal
             annotations:
               cert-manager.io/cluster-issuer: letsencrypt-prod
             extraTls:

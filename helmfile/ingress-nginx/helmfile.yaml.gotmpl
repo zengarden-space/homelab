@@ -11,5 +11,10 @@ releases:
           progressDeadlineSeconds: 10
           networkPolicy:
             enabled: true
+          ingressClassResource:
+            name: internal
+            enabled: true
+            default: false
+            controllerValue: "k8s.io/ingress-nginx-external"
         tcp:
           "22": "gitea/gitea-ssh:22"
