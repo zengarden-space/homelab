@@ -1,0 +1,15 @@
+{{- range $i := until 5 }}
+{{- $bladeNum := add $i 1 | printf "%03d" }}
+{{- $ip := printf "192.168.88.%d" (add 170 $i) }}
+---
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+    name: blade{{ $bladeNum }}
+spec:
+  endpoints:
+    - dnsName: blade{{ $bladeNum }}.zengarden.space
+      recordType: A
+      targets:
+        - {{ $ip }}
+{{- end }}
