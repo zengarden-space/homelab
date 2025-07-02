@@ -486,9 +486,6 @@
         
         # Show OSD status
         kubectl get pods -n rook-ceph -l app=rook-ceph-osd
-        
-        # Show Ceph cluster status via toolbox
-        kubectl exec -n rook-ceph deployment/rook-ceph-tools -- ceph status || echo "Ceph tools not ready yet"
       ignore_errors: true
 
     - name: Create RBD StorageClass and set as default

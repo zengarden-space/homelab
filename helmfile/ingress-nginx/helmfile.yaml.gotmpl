@@ -15,6 +15,7 @@ releases:
             name: internal
             enabled: true
             default: false
-            controllerValue: "k8s.io/ingress-nginx-external"
+            controllerValue: "k8s.io/ingress-nginx-internal"
+          ingressClass: internal
         tcp:
           "22": "gitea/gitea-ssh:22"

@@ -1,4 +1,11 @@
-repositories: []
+environments:
+  default:
+    values:
+      - env.yaml
+---
+repositories: 
+  - name: my-gotify
+    url: https://pmoscode-helm.github.io/gotify/
 
 releases:
   - name: vm
@@ -20,3 +27,42 @@ releases:
                   - grafana.zengarden.space
         prometheus-node-exporter:
           hostNetwork: false
+
+        alertmanager:
+          config:
+            route:
+              receiver: gotify-notifications
+            receivers:
+              - name: gotify-notifications
+                webhook_configs:
+                  - url: http://alertmanager-gotify-bridge/gotify_webhook
+                    send_resolved: true
+
+
+  - name: alertmanager-gotify-bridge
+    chart: ./charts/alertmanager-gotify-bridge
+    namespace: victoria-metrics
+    version: 0.1.0
+    values:
+      - config:
+          gotifyToken: "{{ .Values.notifications.apiToken }}"
+
+  - name: gotify
+    chart: my-gotify/gotify
+    namespace: victoria-metrics
+    version: 0.5.2
+    values:
+      - ingress:
+          enabled: true
+          className: "external"
+          hosts:
+            - host: notifications.zengarden.space
+              paths:
+              - path: /
+                pathType: ImplementationSpecific
+          tls:
+          - hosts:
+            - notifications.zengarden.space
+            secretName: notifications-tls
+        persistence:
+          enabled: true
