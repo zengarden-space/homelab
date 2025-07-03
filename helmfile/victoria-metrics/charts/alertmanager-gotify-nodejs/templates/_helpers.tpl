@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "karma-config.name" -}}
+{{- define "alertmanager-gotify-nodejs.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "karma-config.fullname" -}}
+{{- define "alertmanager-gotify-nodejs.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "karma-config.chart" -}}
+{{- define "alertmanager-gotify-nodejs.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "karma-config.labels" -}}
-helm.sh/chart: {{ include "karma-config.chart" . }}
-{{ include "karma-config.selectorLabels" . }}
+{{- define "alertmanager-gotify-nodejs.labels" -}}
+helm.sh/chart: {{ include "alertmanager-gotify-nodejs.chart" . }}
+{{ include "alertmanager-gotify-nodejs.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,7 +45,18 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "karma-config.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "karma-config.name" . }}
+{{- define "alertmanager-gotify-nodejs.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "alertmanager-gotify-nodejs.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "alertmanager-gotify-nodejs.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "alertmanager-gotify-nodejs.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
 {{- end }}

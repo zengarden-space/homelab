@@ -8,6 +8,8 @@ repositories:
     url: https://pmoscode-helm.github.io/gotify/
   - name: wiremind
     url: https://wiremind.github.io/wiremind-helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
 
 releases:
   - name: vm
@@ -27,58 +29,60 @@ releases:
               - secretName: grafana-tls
                 hosts:
                   - grafana.zengarden.space
-        prometheus-node-exporter:
-          hostNetwork: false
-
+          
+          # Enable unified alerting (Grafana 8+)
+          grafana.ini:
+            unified_alerting:
+              enabled: true
+            alerting:
+              enabled: false  # Disable legacy alerting
+            
+            # Configure external URL for proper links in alerts
+            server:
+              root_url: https://grafana.zengarden.space
+              serve_from_sub_path: false
+   
+        # Re-enable AlertManager now that we have our bridge
         alertmanager:
+          enabled: true
+          baseURL: "https://alerts.zengarden.space"
+          ingress:
+            enabled: true
+            ingressClassName: internal
+            hosts:
+              - alerts.zengarden.space
+            annotations:
+              cert-manager.io/cluster-issuer: "letsencrypt-prod"
+            tls:
+              - secretName: alerts-tls
+                hosts:
+                  - alerts.zengarden.space
           config:
             route:
               receiver: gotify-notifications
-            routes:
-            - match:
-                alertname: 'InfoInhibitor'
-              receiver: 'null'
-            - match:
-                severity: 'info'
-              receiver: 'null'              
             receivers:
               - name: gotify-notifications
                 webhook_configs:
-                  - url: http://alertmanager-gotify-bridge/gotify_webhook
-                    send_resolved: true
-
-
-  - name: alertmanager-gotify-bridge
-    chart: ./charts/alertmanager-gotify-bridge
-    namespace: victoria-metrics
-    version: 0.2.0
-    values:
-      - config:
-          gotifyToken: "{{ .Values.notifications.apiToken }}"
-          dispatchErrors: true
-        templates:
-          enabled: true
-          files:
-            "title-{{ .Values.notifications.apiToken }}.gotmpl": |
-              {{`{{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .Labels.alertname }}{{ if .Labels.instance }} on {{ .Labels.instance }}{{ end }}`}}
-            "{{ .Values.notifications.apiToken }}.gotmpl": |
-              {{`**Status:** {{ if eq .Status "firing" }}FIRING{{ else }}RESOLVED{{ end }}
-              **Alert:** {{ .Labels.alertname }}
-              {{ if .Annotations.summary }}**Summary:** {{ .Annotations.summary }}{{ end }}
-              {{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
-              {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
-              {{ if .Labels.job }}**Job:** {{ .Labels.job }}{{ end }}
-              {{ if .Labels.severity }}**Severity:** {{ .Labels.severity }}{{ end }}
-              
-              **Started:** {{ .StartsAt }}
-              {{ if .GeneratorURL }}[🔗 View in Prometheus]({{ .GeneratorURL }}){{ end }}`}}
+                  - url: http://alertmanager-gotify-nodejs/
+                    send_resolved: false
+        
+        # Configure vmalert to use alertmanager
+        vmalert:
+          spec:
+            notifier:
+              url: http://vmalertmanager-vm-victoria-metrics-k8s-stack:9093
+        
+        prometheus-node-exporter:
+          hostNetwork: false
 
   - name: gotify
     chart: my-gotify/gotify
     namespace: victoria-metrics
     version: 0.5.2
     values:
-      - ingress:
+      - deploymentStrategy:
+          type: Recreate
+        ingress:
           enabled: true
           className: "external"
           hosts:
@@ -92,42 +96,34 @@ releases:
             secretName: notifications-tls
         persistence:
           enabled: true
+        server:
+          defaultUserPassword: {{ .Values.notifications.adminPassword }}
 
-  - name: karma
-    chart: wiremind/karma
+  - name: alertmanager-gotify-nodejs
+    chart: ./charts/alertmanager-gotify-nodejs
     namespace: victoria-metrics
-    version: 2.9.6
     values:
-      - configMap:
-          enabled: true
-          rawConfig:
-            alertmanager:
-              interval: 60s
-              servers:
-                - name: "alertmanager"
-                  uri: "http://vmalertmanager-vm-victoria-metrics-k8s-stack:9093"
-                  timeout: 10s
-                  proxy: true
-            annotations:
-              default:
-                hidden: false
-              hidden:
-                - help
-              visible: []
-        ingress:
-          enabled: true
-          ingressClassName: "internal"
-          hosts:
-            - alerts.zengarden.space
-          tls:
-            - hosts:
-                - alerts.zengarden.space
-              secretName: karma-tls
-          annotations:
-            cert-manager.io/cluster-issuer: "letsencrypt-prod"
-
-  - name: karma-config
-    chart: ./charts/karma-config
-    namespace: victoria-metrics
-    version: 0.1.0
-    values: []
+      - config:
+          gotifyEndpoint: "http://gotify-headless/message"
+          gotifyToken: "{{ .Values.notifications.apiToken }}"
+          listenPort: 8435
+          listenAddr: "0.0.0.0"
+          defaultPriority: 5
+          sendResolved: false
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        service:
+          type: ClusterIP
+          port: 80
+        probes:
+          liveness:
+            enabled: true
+            initialDelaySeconds: 30
+          readiness:
+            enabled: true
+            initialDelaySeconds: 5

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: karma-config
-description: A Helm chart for Karma configuration and network policies
-type: application
-version: 0.1.0
-appVersion: "2.9.6"

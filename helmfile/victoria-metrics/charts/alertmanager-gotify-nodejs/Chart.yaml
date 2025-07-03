@@ -1,0 +1,16 @@
+apiVersion: v2
+name: alertmanager-gotify-nodejs
+description: A lightweight Node.js bridge to forward Prometheus AlertManager notifications to Gotify
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/your-org/alertmanager-gotify-nodejs
+keywords:
+  - alertmanager
+  - gotify
+  - bridge
+  - notifications
+  - prometheus
+  - nodejs
+maintainers:
+  - name: DevOps Team

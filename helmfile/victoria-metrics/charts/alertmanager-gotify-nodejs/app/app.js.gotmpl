@@ -1,0 +1,429 @@
+const http = require('http');
+const connect = require('connect');
+const bodyParser = require('body-parser');
+const fetch = require('node-fetch');
+
+const app = connect();
+app.use(bodyParser.json());
+
+// Utility functions (matching Go code logic)
+function escapeHtml(val) {
+  return val
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function capitalizeFirstChar(val) {
+  if (!val || val.length === 0) return val;
+  return val.charAt(0).toUpperCase() + val.slice(1);
+}
+
+function formatRelativeTime(timestamp) {
+  if (!timestamp || timestamp === "0001-01-01T00:00:00Z") {
+    return null;
+  }
+  
+  try {
+    const alertTime = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - alertTime;
+    const diffSeconds = Math.floor(diffMs / 1000);
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSeconds < 60) {
+      return diffSeconds <= 1 ? 'just now' : `${diffSeconds} seconds ago`;
+    } else if (diffMinutes < 60) {
+      return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`;
+    } else if (diffHours < 24) {
+      const remainingMinutes = diffMinutes % 60;
+      if (remainingMinutes === 0) {
+        return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`;
+      } else {
+        const hourText = diffHours === 1 ? '1 hour' : `${diffHours} hours`;
+        const minuteText = remainingMinutes === 1 ? '1 minute' : `${remainingMinutes} minutes`;
+        return `${hourText} and ${minuteText} ago`;
+      }
+    } else if (diffDays < 30) {
+      const remainingHours = diffHours % 24;
+      if (remainingHours === 0) {
+        return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`;
+      } else {
+        const dayText = diffDays === 1 ? '1 day' : `${diffDays} days`;
+        const hourText = remainingHours === 1 ? '1 hour' : `${remainingHours} hours`;
+        return `${dayText} and ${hourText} ago`;
+      }
+    } else {
+      // For very old alerts, show the actual date
+      return alertTime.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+  } catch (error) {
+    // If parsing fails, return the original timestamp
+    return timestamp;
+  }
+}
+
+function statusEmoji(status) {
+  return status === "resolved" ? "🙂 (resolved)" : "🔥";
+}
+
+function severityEmoji(severity) {
+  switch (severity) {
+    case "info":
+      return "💡";
+    case "warning":
+      return "⚠️";
+    case "critical":
+      return "🆘";
+    case "none":
+      return "💡";
+    default:
+      return "❓";
+  }
+}
+
+function severityIntoPriority(severity) {
+  switch (severity) {
+    case "info":
+      return 0;
+    case "warning":
+      return 7;
+    case "critical":
+      return 10;
+    default:
+      return 10;
+  }
+}
+
+function createMessageFromGroupedAlerts(data) {
+  // Group alerts by alertname + severity for title
+  const alertGroups = {};
+  
+  for (const alert of data.alerts || []) {
+    const alertname = alert.labels?.alertname || 'UnknownAlert';
+    const severity = alert.labels?.severity || 'unknown';
+    const groupKey = `${alertname}:${severity}`;
+    
+    if (!alertGroups[groupKey]) {
+      alertGroups[groupKey] = {
+        alertname: alertname,
+        severity: severity,
+        count: 0
+      };
+    }
+    alertGroups[groupKey].count++;
+  }
+
+  // Build simple title: **<N> alerts** <date>
+  const alertCount = data.alerts ? data.alerts.length : 0;
+  
+  // Add formatted date
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  }) + ' ' + now.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+    timeZoneName: 'short'
+  });
+  
+  const title = `${alertCount} alerts (${dateStr})`;
+
+  // Build message starting with alert list
+  let message = "";
+  
+  // Helper function to get identifying info for an alert
+  function getIdentifyingInfo(alert) {
+    const labels = alert.labels || {};
+    
+    // Try Kubernetes pod info: namespace/pod (container)
+    if (labels.namespace && labels.pod) {
+      let info = `${labels.namespace}/${labels.pod}`;
+      if (labels.container) {
+        info += ` (${labels.container} container)`;
+      }
+      return info;
+    }
+    
+    // Try namespace/service or namespace/deployment
+    if (labels.namespace) {
+      if (labels.service) {
+        return `${labels.namespace}/${labels.service}`;
+      }
+      if (labels.deployment) {
+        return `${labels.namespace}/${labels.deployment}`;
+      }
+      if (labels.job) {
+        return `${labels.namespace}/${labels.job}`;
+      }
+    }
+    
+    // Try instance (common in Prometheus)
+    if (labels.instance) {
+      return labels.instance;
+    }
+    
+    // Try node
+    if (labels.node) {
+      return `node: ${labels.node}`;
+    }
+    
+    // Try exported_instance (some exporters use this)
+    if (labels.exported_instance) {
+      return labels.exported_instance;
+    }
+    
+    // Try device (for disk/network alerts)
+    if (labels.device) {
+      return `device: ${labels.device}`;
+    }
+    
+    // Try job name
+    if (labels.job) {
+      return `job: ${labels.job}`;
+    }
+    
+    // Try hostname
+    if (labels.hostname) {
+      return labels.hostname;
+    }
+    
+    // Fallback to a generic identifier or 'unknown'
+    return '';
+  }
+  
+  // Add individual alert list
+  for (const alert of data.alerts || []) {
+    const severity = alert.labels?.severity || 'unknown';
+    const emoji = severity === 'unknown' ? '🔍' : severityEmoji(severity);
+    const alertname = alert.labels?.alertname || 'UnknownAlert';
+    const identifyingInfo = getIdentifyingInfo(alert);
+    
+    message += `- ${emoji} ${alertname} ${identifyingInfo}\n`;
+  }
+  message += "\n";
+  
+  // Add common annotations if available
+  
+  if (data.externalURL) {
+    try {
+      const url = new URL(data.externalURL);
+      message += `- [Go to Alertmanager](${url})\n`;
+    } catch (err) {
+    }
+  }
+  
+  if (data.truncatedAlerts && data.truncatedAlerts > 0) {
+    message += `- ${data.truncatedAlerts} truncated alerts\n`;
+  }
+  message += "\n";
+
+  let priority = 0;
+  for (const alert of data.alerts || []) {
+    message += "---\n";
+    let status = statusEmoji(alert.status) + " ";
+    if (alert.labels && alert.labels.severity) {
+      const severityStr = severityEmoji(alert.labels.severity);
+      status += severityStr + " ";
+      priority = Math.max(priority, severityIntoPriority(alert.labels.severity));
+    }
+    
+    const alertname = alert.labels?.alertname || 'UnknownAlert';
+    const identifyingInfo = getIdentifyingInfo(alert);
+    
+    message += `**${status}${escapeHtml(alertname)} ${identifyingInfo}**\n`;
+    
+    if (alert.generatorURL) {
+      try {
+        const url = new URL(alert.generatorURL);
+        message += `- [Go to Prometheus](${url})\n`;
+      } catch (err) {
+      }
+    }
+    
+    // Add annotations that are not common
+    const annotationKeys = ["summary", "description"];
+    for (const key of annotationKeys) {
+      if (!(data.commonAnnotations && data.commonAnnotations[key])) {
+        if (alert.annotations && alert.annotations[key]) {
+          message += `- ${capitalizeFirstChar(key)}: ${escapeHtml(alert.annotations[key])}\n`;
+        }
+      }
+    }
+
+    // Show all labels
+    if (alert.labels && Object.keys(alert.labels).length > 0) {
+      message += "\n**Labels:**\n";
+      const sortedLabels = Object.entries(alert.labels).sort(([a], [b]) => a.localeCompare(b));
+      for (const [name, value] of sortedLabels) {
+        message += `- 🏷️ ${escapeHtml(name)} = ${escapeHtml(value)}\n`;
+      }
+    }
+
+    // Show all annotations
+    if (alert.annotations && Object.keys(alert.annotations).length > 0) {
+      message += "\n**Annotations:**\n";
+      const sortedAnnotations = Object.entries(alert.annotations).sort(([a], [b]) => a.localeCompare(b));
+      for (const [name, value] of sortedAnnotations) {
+        message += `- ✍️ ${escapeHtml(name)} = ${escapeHtml(value)}\n`;
+      }
+    }
+
+    message += "\n**Timestamps:**\n";
+    if (alert.startsAt) {
+      const relativeStart = formatRelativeTime(alert.startsAt);
+      if (relativeStart) {
+        message += `- ⏰ Started: ${relativeStart}\n`;
+      }
+    }
+    if (alert.endsAt && alert.endsAt !== "0001-01-01T00:00:00Z") {
+      const relativeEnd = formatRelativeTime(alert.endsAt);
+      if (relativeEnd) {
+        message += `- ⏹️ Ended: ${relativeEnd}\n`;
+      }
+    }
+    if (alert.fingerprint) {
+      message += `- 🔍 Fingerprint: ${escapeHtml(alert.fingerprint)}\n`;
+    }
+    message += "\n\n";
+  }
+  message = message.trim();
+
+  return {
+    title: title,
+    message: message,
+    priority: priority,
+    extras: {
+      "client::display": {
+        "contentType": "text/markdown"
+      }
+    }
+  };
+}
+
+// Health check endpoint
+app.use('/health', (req, res) => {
+  res.writeHead(200, {'Content-Type': 'application/json'});
+  res.end(JSON.stringify({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: 'alertmanager-gotify-nodejs',
+    version: '{{ .Chart.AppVersion }}'
+  }));
+});
+
+// Main webhook endpoint
+app.use(async (req, res) => {
+  try {
+    console.log("Received webhook:", JSON.stringify(req.body, null, 2));
+    
+    if (!req.body) {
+      console.log("No request body");
+      res.writeHead(400, {'Content-Type': 'text/plain'});
+      res.end("Bad Request: No request body\n");
+      return;
+    }
+
+    // Check version compatibility (matching Go code)
+    if (req.body.version && req.body.version !== "4") {
+      console.log(`Unsupported version: ${req.body.version}`);
+      res.writeHead(501, {'Content-Type': 'text/plain'});
+      res.end("Only version 4 is implemented.\n");
+      return;
+    }
+
+    // Handle grouped alerts format (like the Go code expects)
+    const data = req.body;
+    if (!data.alerts || !Array.isArray(data.alerts)) {
+      console.log("No alerts array in request body");
+      res.writeHead(400, {'Content-Type': 'text/plain'});
+      res.end("Bad Request: No alerts found\n");
+      return;
+    }
+
+    // Filter alerts based on status if configured
+    let alertsToProcess = data.alerts;
+    if (process.env.SEND_RESOLVED !== "true") {
+      alertsToProcess = data.alerts.filter(alert => alert.status === "firing");
+    }
+
+    if (alertsToProcess.length === 0) {
+      console.log("No alerts to process after filtering");
+      res.writeHead(200, {'Content-Type': 'text/plain'});
+      res.end("No alerts to process\n");
+      return;
+    }
+
+    // Create message using the Go code logic
+    const processedData = {
+      ...data,
+      alerts: alertsToProcess
+    };
+    
+    const gotifyMessage = createMessageFromGroupedAlerts(processedData);
+    
+    console.log("Dispatching to Gotify:", JSON.stringify(gotifyMessage, null, 2));
+    
+    try {
+      const response = await fetch(process.env.GOTIFY_MESSAGE_ENDPOINT, {
+        method: 'POST',
+        body: JSON.stringify(gotifyMessage),
+        headers: { 
+          "Content-Type": "application/json",
+          "X-Gotify-Key": process.env.GOTIFY_TOKEN
+        }
+      });
+      
+      if (response.ok) {
+        console.log(`Successfully sent grouped alert: ${gotifyMessage.title}`);
+        res.writeHead(200, {'Content-Type': 'text/plain'});
+        res.end(`Processed ${alertsToProcess.length} alerts successfully\n`);
+      } else {
+        console.error(`Failed to send alert: ${response.status} ${response.statusText}`);
+        res.writeHead(500, {'Content-Type': 'text/plain'});
+        res.end("Failed to send to Gotify\n");
+      }
+    } catch (error) {
+      console.error("Error sending to Gotify:", error.message);
+      res.writeHead(500, {'Content-Type': 'text/plain'});
+      res.end("Error sending to Gotify\n");
+    }
+    
+  } catch (error) {
+    console.error("Error processing webhook:", error);
+    res.writeHead(500, {'Content-Type': 'text/plain'});
+    res.end("Internal Server Error\n");
+  }
+});
+
+const port = parseInt(process.env.LISTEN_PORT || '{{ .Values.config.listenPort }}');
+const host = process.env.LISTEN_ADDR || '{{ .Values.config.listenAddr }}';
+
+const server = http.createServer(app).listen(port, host, () => {
+  console.log(`Alertmanager-Gotify bridge listening on ${host}:${port}`);
+  console.log(`Health check available at: http://${host}:${port}/health`);
+  console.log(`Gotify endpoint: ${process.env.GOTIFY_MESSAGE_ENDPOINT}`);
+  console.log(`Chart: {{ .Chart.Name }} v{{ .Chart.Version }}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});

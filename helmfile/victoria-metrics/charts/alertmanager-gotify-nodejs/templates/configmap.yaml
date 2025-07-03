@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alertmanager-gotify-nodejs.fullname" . }}-app
+  labels:
+    {{- include "alertmanager-gotify-nodejs.labels" . | nindent 4 }}
+data:
+  package.json: {{ tpl (.Files.Get "app/package.json.gotmpl") . | quote }}
+  app.js: {{ tpl (.Files.Get "app/app.js.gotmpl") . | quote }}
