@@ -1,8 +1,8 @@
 apiVersion: v2
 name: alertmanager-gotify-bridge
-description: A Helm chart for alertmanager_gotify_bridge - a bridge between Prometheus AlertManager and Gotify server
+description: A Helm chart for alertmanager_gotify_bridge - a bridge between Prometheus AlertManager and Gotify server with custom template support
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "2.3.2"
 home: https://github.com/DRuggeri/alertmanager_gotify_bridge
 sources:

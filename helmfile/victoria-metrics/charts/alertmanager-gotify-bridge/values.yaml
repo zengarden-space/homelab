@@ -67,6 +67,26 @@ env: []
 volumes: []
 volumeMounts: []
 
+# Custom templates configuration
+templates:
+  # Enable custom templates
+  enabled: false
+  
+  # Custom templates as a map of filename -> template content
+  # Template files will be mounted to /templates directory
+  # Supported extensions: .gohtml, .gotmpl, .tmpl
+  # Template names should follow the pattern: title=<token> for title templates, <token> for message templates
+  # Example:
+  # files:
+  #   "title=mytoken.gotmpl": |
+  #     {{ .Labels.alertname }} - {{ .Annotations.summary }}
+  #   "mytoken.gotmpl": |
+  #     **Alert:** {{ .Labels.alertname }}
+  #     **Status:** {{ .Status }}
+  #     **Description:** {{ .Annotations.description }}
+  #     {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
+  files: {}
+
 # Network policy configuration
 networkPolicy:
   enabled: true

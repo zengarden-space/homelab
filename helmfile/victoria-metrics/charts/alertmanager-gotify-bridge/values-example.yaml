@@ -1,0 +1,108 @@
+# Example values file demonstrating custom templates
+# Copy this to your values file and modify as needed
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/druggeri/alertmanager_gotify_bridge
+  pullPolicy: IfNotPresent
+  tag: "2.3.2"
+
+config:
+  gotifyEndpoint: "http://gotify-headless/message"
+  gotifyToken: "your-gotify-token-here"
+  
+  bindAddress: "0.0.0.0"
+  port: 8080
+  webhookPath: "/gotify_webhook"
+  timeout: "5s"
+  
+  titleAnnotation: "summary"
+  messageAnnotation: "description"
+  priorityAnnotation: "priority"
+  defaultPriority: 5
+  
+  extendedDetails: false
+  dispatchErrors: true  # Enable to help debug template issues
+  debug: false
+
+# Enable and configure custom templates
+templates:
+  enabled: true
+  files:
+    # Production alerts template (for token "prod")
+    "title=prod.gotmpl": |
+      {{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .Labels.alertname }}{{ if .Labels.instance }} on {{ .Labels.instance }}{{ end }}
+    
+    "prod.gotmpl": |
+      **Status:** {{ if eq .Status "firing" }}FIRING{{ else }}RESOLVED{{ end }}
+      **Alert:** {{ .Labels.alertname }}
+      {{ if .Annotations.summary }}**Summary:** {{ .Annotations.summary }}{{ end }}
+      {{ if .Annotations.description }}
+      **Description:** {{ .Annotations.description }}{{ end }}
+      {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
+      {{ if .Labels.job }}**Job:** {{ .Labels.job }}{{ end }}
+      {{ if .Labels.severity }}**Severity:** {{ .Labels.severity }}{{ end }}
+      
+      **Started:** {{ .StartsAt }}
+      {{ if .GeneratorURL }}
+      [🔗 View in Prometheus]({{ .GeneratorURL }}){{ end }}
+    
+    # Development/staging alerts template (for token "dev")
+    "title=dev.gotmpl": |
+      [DEV] {{ .Labels.alertname }}
+    
+    "dev.gotmpl": |
+      🧪 **Development Alert**
+      
+      **Name:** {{ .Labels.alertname }}
+      **Status:** {{ .Status }}
+      {{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
+      {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
+    
+    # Critical alerts template (for token "critical")
+    "title=critical.gotmpl": |
+      🚨 CRITICAL: {{ .Labels.alertname }}
+    
+    "critical.gotmpl": |
+      ## 🚨 CRITICAL ALERT
+      
+      **Alert:** {{ .Labels.alertname }}
+      **Status:** {{ .Status | toUpper }}
+      
+      {{ if .Annotations.summary }}### Summary
+      {{ .Annotations.summary }}{{ end }}
+      
+      {{ if .Annotations.description }}### Description
+      {{ .Annotations.description }}{{ end }}
+      
+      ### Details
+      {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
+      {{ if .Labels.job }}**Job:** {{ .Labels.job }}{{ end }}
+      **Started:** {{ .StartsAt }}
+      
+      {{ if .GeneratorURL }}[🔗 **View in Prometheus**]({{ .GeneratorURL }}){{ end }}
+    
+    # Default template (fallback for any token)
+    "default.gotmpl": |
+      **{{ .Labels.alertname }}** - {{ .Status }}
+      
+      {{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
+      {{ if .Annotations.description }}
+      {{ .Annotations.description }}{{ end }}
+
+# Network policy to allow traffic
+networkPolicy:
+  enabled: true
+  ingress:
+    allowMonitoring: true
+  egress:
+    extraRules: []
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

@@ -6,6 +6,8 @@ environments:
 repositories: 
   - name: my-gotify
     url: https://pmoscode-helm.github.io/gotify/
+  - name: wiremind
+    url: https://wiremind.github.io/wiremind-helm-charts
 
 releases:
   - name: vm
@@ -32,6 +34,13 @@ releases:
           config:
             route:
               receiver: gotify-notifications
+            routes:
+            - match:
+                alertname: 'InfoInhibitor'
+              receiver: 'null'
+            - match:
+                severity: 'info'
+              receiver: 'null'              
             receivers:
               - name: gotify-notifications
                 webhook_configs:
@@ -42,10 +51,27 @@ releases:
   - name: alertmanager-gotify-bridge
     chart: ./charts/alertmanager-gotify-bridge
     namespace: victoria-metrics
-    version: 0.1.0
+    version: 0.2.0
     values:
       - config:
           gotifyToken: "{{ .Values.notifications.apiToken }}"
+          dispatchErrors: true
+        templates:
+          enabled: true
+          files:
+            "title-{{ .Values.notifications.apiToken }}.gotmpl": |
+              {{`{{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .Labels.alertname }}{{ if .Labels.instance }} on {{ .Labels.instance }}{{ end }}`}}
+            "{{ .Values.notifications.apiToken }}.gotmpl": |
+              {{`**Status:** {{ if eq .Status "firing" }}FIRING{{ else }}RESOLVED{{ end }}
+              **Alert:** {{ .Labels.alertname }}
+              {{ if .Annotations.summary }}**Summary:** {{ .Annotations.summary }}{{ end }}
+              {{ if .Annotations.description }}**Description:** {{ .Annotations.description }}{{ end }}
+              {{ if .Labels.instance }}**Instance:** {{ .Labels.instance }}{{ end }}
+              {{ if .Labels.job }}**Job:** {{ .Labels.job }}{{ end }}
+              {{ if .Labels.severity }}**Severity:** {{ .Labels.severity }}{{ end }}
+              
+              **Started:** {{ .StartsAt }}
+              {{ if .GeneratorURL }}[🔗 View in Prometheus]({{ .GeneratorURL }}){{ end }}`}}
 
   - name: gotify
     chart: my-gotify/gotify
@@ -66,3 +92,42 @@ releases:
             secretName: notifications-tls
         persistence:
           enabled: true
+
+  - name: karma
+    chart: wiremind/karma
+    namespace: victoria-metrics
+    version: 2.9.6
+    values:
+      - configMap:
+          enabled: true
+          rawConfig:
+            alertmanager:
+              interval: 60s
+              servers:
+                - name: "alertmanager"
+                  uri: "http://vmalertmanager-vm-victoria-metrics-k8s-stack:9093"
+                  timeout: 10s
+                  proxy: true
+            annotations:
+              default:
+                hidden: false
+              hidden:
+                - help
+              visible: []
+        ingress:
+          enabled: true
+          ingressClassName: "internal"
+          hosts:
+            - alerts.zengarden.space
+          tls:
+            - hosts:
+                - alerts.zengarden.space
+              secretName: karma-tls
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+  - name: karma-config
+    chart: ./charts/karma-config
+    namespace: victoria-metrics
+    version: 0.1.0
+    values: []

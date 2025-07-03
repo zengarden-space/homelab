@@ -1,0 +1,17 @@
+{{- if and .Values.templates.enabled .Values.templates.files }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alertmanager-gotify-bridge.fullname" . }}-templates
+  labels:
+    {{- include "alertmanager-gotify-bridge.labels" . | nindent 4 }}
+data:
+{{- range $filename, $content := .Values.templates.files }}
+  {{- $finalFilename := $filename }}
+  {{- if hasPrefix "title-" $filename }}
+    {{- $finalFilename = (print "title=" (trimPrefix "title-" $filename)) }}
+  {{- end }}
+  {{ $finalFilename }}: |
+{{ $content | nindent 4 }}
+{{- end }}
+{{- end }}
