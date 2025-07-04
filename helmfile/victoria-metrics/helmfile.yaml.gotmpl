@@ -43,12 +43,16 @@ releases:
               serve_from_sub_path: false
         
         # k3s specifics
+        kubeApiServer:
+          enabled: false
         kubeControllerManager:
           enabled: false
         kubeScheduler:
           enabled: false
         kubeProxy:
           enabled: false   
+        kubelet:
+          enabled: false
 
         alertmanager:
           enabled: true
