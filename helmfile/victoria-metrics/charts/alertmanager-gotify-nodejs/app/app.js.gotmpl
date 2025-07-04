@@ -244,7 +244,7 @@ function createMessageFromGroupedAlerts(data) {
     const alertname = alert.labels?.alertname || 'UnknownAlert';
     const identifyingInfo = getIdentifyingInfo(alert);
     
-    message += `**${status}${escapeHtml(alertname)} ${identifyingInfo}**\n`;
+    message += `h3. ${status}${escapeHtml(alertname)} ${identifyingInfo}\n`;
     
     if (alert.generatorURL) {
       try {

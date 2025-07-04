@@ -41,11 +41,19 @@ releases:
             server:
               root_url: https://grafana.zengarden.space
               serve_from_sub_path: false
-   
-        # Re-enable AlertManager now that we have our bridge
+        
+        # k3s specifics
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false   
+
         alertmanager:
           enabled: true
-          baseURL: "https://alerts.zengarden.space"
+          spec:
+            externalURL: "https://alerts.zengarden.space"
           ingress:
             enabled: true
             ingressClassName: internal
@@ -60,12 +68,21 @@ releases:
           config:
             route:
               receiver: gotify-notifications
+              routes:
+              - receiver: devnull
+                matchers:
+                  - alertname=~"InfoInhibitor|Watchdog"
             receivers:
+              - name: devnull
               - name: gotify-notifications
                 webhook_configs:
                   - url: http://alertmanager-gotify-nodejs/
                     send_resolved: false
         
+        vmagent:
+          spec:
+            daemonSetMode: true
+
         # Configure vmalert to use alertmanager
         vmalert:
           spec:
