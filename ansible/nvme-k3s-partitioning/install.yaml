@@ -1,0 +1,123 @@
+---
+- name: Format NVMe drive for K3s
+  become: true
+  hosts: masters
+  vars:
+    nvme_device: "/dev/nvme0n1"
+    k3s_mount_point: "/var/lib/rancher/k3s"
+    
+  tasks:
+    - name: Ping hosts
+      ping:
+
+    - name: Stop K3s service if running
+      systemd:
+        name: k3s
+        state: stopped
+      ignore_errors: yes
+
+    - name: Unmount existing mount point
+      mount:
+        path: "{{ k3s_mount_point }}"
+        state: unmounted
+      ignore_errors: yes
+
+    - name: Clean mount point directory (remove any files if not mounted)
+      shell: |
+        # Check if directory exists and is not a mount point, then clean it
+        if [ -d "{{ k3s_mount_point }}" ] && ! mountpoint -q "{{ k3s_mount_point }}"; then
+          echo "Cleaning directory: {{ k3s_mount_point }}"
+          rm -rf "{{ k3s_mount_point }}"/*
+          rm -rf "{{ k3s_mount_point }}"/.*
+        fi
+      ignore_errors: yes
+
+    - name: Remove any existing LVM volumes on NVMe
+      shell: |
+        # Remove any existing LVM volumes on NVMe
+        for vg in $(vgs --noheadings -o vg_name | grep -E '(ceph|k3s)' || true); do
+          echo "Removing VG: $vg"
+          vgremove -f "$vg" || true
+        done
+        
+        # Remove any existing physical volumes on NVMe
+        for pv in $(pvs --noheadings -o pv_name | grep nvme0n1 || true); do
+          echo "Removing PV: $pv"
+          pvremove -f "$pv" || true
+        done
+      ignore_errors: yes
+
+    - name: Wipe NVMe device completely
+      shell: |
+        # Stop any processes using the device
+        fuser -k {{ nvme_device }} || true
+        
+        # Wipe filesystem signatures
+        wipefs -af {{ nvme_device }}
+        
+        # Zero out the beginning of the device
+        dd if=/dev/zero of={{ nvme_device }} bs=1M count=100 status=progress || true
+        
+        # Zero out the end of the device  
+        dd if=/dev/zero of={{ nvme_device }} bs=1M seek=$(( $(blockdev --getsz {{ nvme_device }}) / 2048 - 100 )) count=100 status=progress || true
+        
+        # Inform kernel of partition changes
+        partprobe {{ nvme_device }} || true
+        
+        echo "NVMe device {{ nvme_device }} wiped successfully"
+
+    - name: Format entire NVMe device with ext4
+      filesystem:
+        fstype: ext4
+        dev: "{{ nvme_device }}"
+        opts: "-L k3s-data"
+
+    - name: Create mount point directory
+      file:
+        path: "{{ k3s_mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount NVMe device
+      mount:
+        path: "{{ k3s_mount_point }}"
+        src: "{{ nvme_device }}"
+        fstype: ext4
+        opts: defaults,noatime
+        state: mounted
+
+    - name: Add NVMe device to fstab
+      mount:
+        path: "{{ k3s_mount_point }}"
+        src: "{{ nvme_device }}"
+        fstype: ext4
+        opts: defaults,noatime
+        state: present
+
+    - name: Set correct ownership for mount directory
+      file:
+        path: "{{ k3s_mount_point }}"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Display filesystem information
+      shell: |
+        echo "=== NVMe device {{ nvme_device }} information ==="
+        lsblk {{ nvme_device }}
+        echo ""
+        echo "=== Filesystem information ==="
+        df -h {{ k3s_mount_point }}
+        echo ""
+        echo "=== Mount information ==="
+        mount | grep {{ nvme_device }}
+      register: fs_info
+
+    - name: Show filesystem results
+      debug:
+        msg: "{{ fs_info.stdout_lines }}"
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
