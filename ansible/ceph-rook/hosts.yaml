@@ -1,0 +1,22 @@
+all:
+  children:
+    bootstrapMaster:
+      hosts:
+        blade001:
+          ansible_host: blade001
+    masters:
+      hosts:
+        blade002:
+          ansible_host: blade002
+        blade003:
+          ansible_host: blade003
+    workers:
+      hosts:
+        blade004:
+          ansible_host: blade004
+        blade005:
+          ansible_host: blade005
+  vars:
+    ansible_user: oleksiyp
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    ansible_python_interpreter: /usr/bin/python3
