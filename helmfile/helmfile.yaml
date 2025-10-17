@@ -19,3 +19,6 @@ helmfiles:
   # GitOps & CI/CD
   - path: argocd/helmfile.yaml.gotmpl
   - path: gitea/helmfile.yaml.gotmpl
+
+  # DB
+  - path: cnpg-system/helmfile.yaml.gotmpl

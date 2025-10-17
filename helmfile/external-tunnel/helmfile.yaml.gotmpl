@@ -24,6 +24,21 @@ releases:
             enabled: true
           admissionWebhooks:
             enabled: false
+          config:
+            enable-modsecurity: "true"
+            modsecurity-snippet: |
+              SecAction "id:900200,phase:1,nolog,pass,t:none,setvar:\'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE\'"
+              Include /etc/nginx/owasp-modsecurity-crs/nginx-modsecurity.conf
+              SecRuleEngine On
+              SecRequestBodyAccess On
+              SecRule REQUEST_HEADERS:Content-Type "(?:text|application(?:/soap\+|/)|application/xml)/" \
+                "id:200000,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=XML"
+              SecRule REQUEST_HEADERS:Content-Type "application/json" \
+                "id:200001,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=JSON"
+              SecRequestBodyLimitAction Reject
+              SecAuditLog /dev/stdout
+              SecAuditLogFormat JSON
+              SecAuditEngine RelevantOnly
 
   - name: cloudflare-tunnel
     namespace: external-tunnel
