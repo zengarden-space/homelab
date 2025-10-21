@@ -38,7 +38,7 @@ This Helm chart deploys Gitea Action Runners with automatic token generation.
 
 ```yaml
 gitea:
-  url: "https://gitea.zengarden.space"
+  url: "https://gitea.homelab.int.zengarden.space"
   image: "docker.gitea.com/gitea:1.23.8-rootless"
 
 runner:

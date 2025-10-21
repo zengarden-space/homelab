@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "metabase-cnpg-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "metabase-cnpg-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "metabase-cnpg-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "metabase-cnpg-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "metabase-cnpg-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: shell-operator
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        env:
+        - name: METABASE_URL
+          value: {{ .Values.metabase.url | quote }}
+        - name: METABASE_ADMIN_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              key: admin-email
+        - name: METABASE_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              key: admin-password
+        - name: LOG_TYPE
+          value: "json"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: SHELL_OPERATOR_WORKING_DIR
+          value: /tmp/shell-operator
+        volumeMounts:
+        - name: hooks
+          mountPath: /hooks
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: shell-operator-working-dir
+          mountPath: /var/run/shell-operator
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      volumes:
+      - name: hooks
+        configMap:
+          name: {{ include "metabase-cnpg-operator.fullname" . }}-hooks
+          defaultMode: 0755
+      - name: tmp
+        emptyDir: {}
+      - name: shell-operator-working-dir
+        emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

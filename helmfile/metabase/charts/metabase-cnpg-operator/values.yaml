@@ -1,0 +1,52 @@
+replicaCount: 1
+
+image:
+  repository: gitea.homelab.int.zengarden.space/zengarden-space/external-images/shell-operator
+  tag: v1.4.10
+  pullPolicy: IfNotPresent
+
+metabase:
+  # Metabase service connection
+  url: http://metabase.metabase.svc.cluster.local
+  # Admin credentials - should be set via env.yaml
+  adminEmail: ""
+  adminPassword: ""
+
+# Namespaces to watch for CNPG databases (empty = all namespaces)
+watchNamespaces: []
+
+# Sync interval for periodic reconciliation (in addition to event-driven)
+syncInterval: "300"  # 5 minutes
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

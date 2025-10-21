@@ -8,7 +8,7 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     - git:
-        repoURL: https://gitea.zengarden.space/zengarden-space/manifests.git
+        repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
         revision: main
         directories:
         - path: "manifests/*"
@@ -25,7 +25,7 @@ spec:
         syncOptions:
           - CreateNamespace=true
       source:
-        repoURL: https://gitea.zengarden.space/zengarden-space/manifests.git
+        repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
         targetRevision: main
         path: '{{.path.path}}'
       destination:

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: metabase-cnpg-operator
+description: Shell-operator based operator to sync CNPG databases to Metabase
+type: application
+version: 0.1.0
+appVersion: "1.0"

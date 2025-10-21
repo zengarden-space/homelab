@@ -8,10 +8,6 @@ helmfiles:
   - path: external-dns/helmfile.yaml.gotmpl
   - path: ingress-nginx/helmfile.yaml.gotmpl
   - path: external-tunnel/helmfile.yaml.gotmpl
-  
-  # Authentication & Security
-  - path: authelia/helmfile.yaml.gotmpl
-  - path: mail/helmfile.yaml.gotmpl
 
   # Monitoring
   - path: victoria-metrics/helmfile.yaml.gotmpl
@@ -22,3 +18,6 @@ helmfiles:
 
   # DB
   - path: cnpg-system/helmfile.yaml.gotmpl
+
+  # Analytics
+  - path: metabase/helmfile.yaml.gotmpl

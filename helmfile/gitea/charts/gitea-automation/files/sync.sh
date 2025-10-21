@@ -155,7 +155,7 @@ EOF
 }
 
 # Create ArgoCD webhook
-create_org_webhook "http://argocd.zengarden.space" "${ARGOCD_WEBHOOK_SECRET}"
+create_org_webhook "http://argocd.homelab.int.zengarden.space" "${ARGOCD_WEBHOOK_SECRET}"
 
 # Function to create organization secret
 create_org_secret() {

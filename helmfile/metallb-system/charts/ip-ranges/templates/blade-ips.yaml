@@ -8,7 +8,7 @@ metadata:
     name: blade{{ $bladeNum }}
 spec:
   endpoints:
-    - dnsName: blade{{ $bladeNum }}.zengarden.space
+    - dnsName: blade{{ $bladeNum }}.homelab.int.zengarden.space
       recordType: A
       targets:
         - {{ $ip }}

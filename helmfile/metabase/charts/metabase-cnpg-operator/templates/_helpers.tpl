@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "maildev-config.name" -}}
+{{- define "metabase-cnpg-operator.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "maildev-config.fullname" -}}
+{{- define "metabase-cnpg-operator.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "maildev-config.chart" -}}
+{{- define "metabase-cnpg-operator.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "maildev-config.labels" -}}
-helm.sh/chart: {{ include "maildev-config.chart" . }}
-{{ include "maildev-config.selectorLabels" . }}
+{{- define "metabase-cnpg-operator.labels" -}}
+helm.sh/chart: {{ include "metabase-cnpg-operator.chart" . }}
+{{ include "metabase-cnpg-operator.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,7 +43,19 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "maildev-config.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "maildev-config.name" . }}
+{{- define "metabase-cnpg-operator.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "metabase-cnpg-operator.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "metabase-cnpg-operator.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "metabase-cnpg-operator.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+

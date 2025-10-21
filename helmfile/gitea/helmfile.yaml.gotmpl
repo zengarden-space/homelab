@@ -37,7 +37,7 @@ releases:
           enabled: true
           className: internal
           hosts:
-            - host: gitea.zengarden.space
+            - host: gitea.homelab.int.zengarden.space
               paths:
                 - path: /
                   pathType: Prefix
@@ -46,7 +46,7 @@ releases:
             nginx.ingress.kubernetes.io/proxy-body-size: 500m
           tls:
             - hosts:
-                - gitea.zengarden.space
+                - gitea.homelab.int.zengarden.space
               secretName: gitea-tls
         strategy:
           type: RollingUpdate

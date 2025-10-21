@@ -22,13 +22,13 @@ releases:
             enabled: true
             ingressClassName: internal
             hosts:
-              - grafana.zengarden.space
+              - grafana.homelab.int.zengarden.space
             annotations:
               cert-manager.io/cluster-issuer: "letsencrypt-prod"
             tls:
               - secretName: grafana-tls
                 hosts:
-                  - grafana.zengarden.space
+                  - grafana.homelab.int.zengarden.space
           
           # Enable unified alerting (Grafana 8+)
           grafana.ini:
@@ -39,7 +39,7 @@ releases:
             
             # Configure external URL for proper links in alerts
             server:
-              root_url: https://grafana.zengarden.space
+              root_url: https://grafana.homelab.int.zengarden.space
               serve_from_sub_path: false
         
         # k3s specifics
@@ -57,18 +57,18 @@ releases:
         alertmanager:
           enabled: true
           spec:
-            externalURL: "https://alerts.zengarden.space"
+            externalURL: "https://alerts.homelab.int.zengarden.space"
           ingress:
             enabled: true
             ingressClassName: internal
             hosts:
-              - alerts.zengarden.space
+              - alerts.homelab.int.zengarden.space
             annotations:
               cert-manager.io/cluster-issuer: "letsencrypt-prod"
             tls:
               - secretName: alerts-tls
                 hosts:
-                  - alerts.zengarden.space
+                  - alerts.homelab.int.zengarden.space
           config:
             route:
               receiver: gotify-notifications
@@ -103,13 +103,13 @@ releases:
           enabled: true
           className: "external"
           hosts:
-            - host: notifications.zengarden.space
+            - host: notifications.homelab.int.zengarden.space
               paths:
               - path: /
                 pathType: ImplementationSpecific
           tls:
           - hosts:
-            - notifications.zengarden.space
+            - notifications.homelab.int.zengarden.space
             secretName: notifications-tls
         persistence:
           enabled: true

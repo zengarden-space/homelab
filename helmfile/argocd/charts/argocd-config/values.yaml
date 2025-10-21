@@ -5,7 +5,7 @@ applicationSet:
   
   # Git repository configuration
   git:
-    repoURL: https://gitea.zengarden.space/zengarden-space/manifests.git
+    repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
     revision: main
     manifestsPath: "manifests/*"
   

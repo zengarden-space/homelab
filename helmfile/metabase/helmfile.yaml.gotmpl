@@ -1,0 +1,80 @@
+# Metabase configuration
+# Add any secrets or configuration values here if needed in the future
+environments:
+  default:
+    values:
+      - env.yaml
+---
+repositories:
+  - name: pmint93
+    url: https://pmint93.github.io/helm-charts
+
+releases:
+  - name: metabase
+    namespace: metabase
+    chart: pmint93/metabase
+    version: 2.22.2
+    values:
+      - replicaCount: 1
+        timeZone: UTC
+        database:
+          type: h2
+          file: /data/metabase.db
+          persistence:
+            enabled: true
+            size: 10Gi
+            accessModes:
+              - ReadWriteOnce
+        ingress:
+          enabled: true
+          className: internal
+          hosts:
+            - metabase.homelab.int.zengarden.space
+          path: /
+          pathType: Prefix
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+          tls:
+            - hosts:
+                - metabase.homelab.int.zengarden.space
+              secretName: metabase-tls
+
+        extraEnv:
+          - name: MB_PLUGINS_DIR
+            value: /tmp/plugins
+
+        extraVolumes:
+          - name: tmp
+            emptyDir: {}
+
+        extraVolumeMounts:
+          - name: tmp
+            mountPath: /tmp
+            readOnly: false
+
+        podSecurityContext:
+          runAsNonRoot: true
+          runAsUser: 2000
+          runAsGroup: 2000
+          fsGroup: 2000
+          seccompProfile:
+            type: RuntimeDefault
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+
+  - name: metabase-cnpg-operator
+    namespace: metabase
+    chart: ./charts/metabase-cnpg-operator
+    needs:
+      - metabase
+    values:
+      - metabase:
+          url: http://metabase.metabase.svc.cluster.local
+          adminEmail: admin@example.com
+          adminPassword: {{ .Values.metabase.adminPassword | quote }}

@@ -15,7 +15,7 @@ releases:
       - createAggregateRoles: true
 
         global:
-          domain: argocd.zengarden.space
+          domain: argocd.homelab.int.zengarden.space
 
         redis-ha:
           enabled: true
@@ -37,7 +37,7 @@ releases:
               cert-manager.io/cluster-issuer: letsencrypt-prod
             extraTls:
               - hosts:
-                  - argocd.zengarden.space
+                  - argocd.homelab.int.zengarden.space
                 secretName: argocd-tls
 
         repoServer:
@@ -60,6 +60,6 @@ releases:
     values:
       - applicationSet:
           git:
-            repoURL: https://gitea.zengarden.space/zengarden-space/manifests.git
+            repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
             revision: main
             manifestsPath: manifests/*
