@@ -13,7 +13,7 @@ spec:
       {{- end }}
       containers:
       - name: generate-token-and-create-secret
-        image: bitnami/kubectl:1.33.1
+        image: alpine/kubectl:1.34.1
         command: ['sh', '-c']
         args:
         - |

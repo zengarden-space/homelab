@@ -54,9 +54,13 @@ releases:
               originRequest:
                   noTLSVerify: true
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
-              hostname: "*.homelab.int.zengarden.space"
+              hostname: "*.zengarden.space"
               originRequest:
                   noTLSVerify: true          
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "effective-retro.com"
+              originRequest:
+                  noTLSVerify: true
         securityContext:
           seccompProfile:
             type: RuntimeDefault

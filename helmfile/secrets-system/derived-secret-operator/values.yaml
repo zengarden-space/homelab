@@ -1,0 +1,96 @@
+# Default values for derived-secret-operator
+
+# Operator configuration
+operator:
+  replicaCount: 1
+  
+  image:
+    repository: flant/shell-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  logLevel: "info"
+  
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# Crypto sidecar configuration (Python with Argon2)
+cryptoSidecar:
+  image:
+    repository: python
+    tag: "3.11-alpine"
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  
+  # Argon2 parameters (security vs performance trade-off)
+  argon2:
+    timeCost: 3          # Number of iterations
+    memoryCost: 65536    # Memory in KB (64 MB)
+    parallelism: 4       # Number of threads
+  
+  # Home directory PVC for pip packages
+  home:
+    storageClassName: ""  # Use default storage class if empty
+
+# Master password secret
+# IMPORTANT: Generate a strong master password and store it securely
+# Example: openssl rand -base64 32
+masterPassword:
+  # Set this to your master password
+  # WARNING: In production, use Sealed Secrets or External Secrets
+  value: ""
+  
+  # Use existing secret instead
+  existingSecret: ""
+  existingSecretKey: "master-password"
+  
+  # Canary for detecting password changes
+  canaryIdentifier: "system-canary"
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: secret-operator
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

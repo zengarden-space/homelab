@@ -22,11 +22,11 @@ spec:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       containers:
       - name: pat-generator
-        image: bitnami/kubectl:1.33.1
+        image: alpine/kubectl:1.34.1
         imagePullPolicy: {{ $.Values.job.image.pullPolicy }}
         securityContext:
           {{- toYaml $.Values.job.securityContext | nindent 10 }}
-        command: ['/bin/bash']
+        command: ['/bin/sh']
         args: ['/scripts/token-generator.sh']
         env:
         - name: TOKEN_NAME

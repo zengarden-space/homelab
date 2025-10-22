@@ -289,6 +289,7 @@
         helm repo add cilium https://helm.cilium.io/
         helm repo update
         helm upgrade --install cilium cilium/cilium --version 1.17.4 \
+          --set ipam.operator.clusterPoolIPv4PodCIDRList="10.42.0.0/16" \
           --namespace kube-system
         
         cilium status --wait

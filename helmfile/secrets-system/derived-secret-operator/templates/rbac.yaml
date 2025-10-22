@@ -1,0 +1,36 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "derived-secret-operator.fullname" . }}
+  labels:
+    {{- include "derived-secret-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["zengarden.space"]
+    resources: ["derivedsecrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["zengarden.space"]
+    resources: ["derivedsecrets/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "derived-secret-operator.fullname" . }}
+  labels:
+    {{- include "derived-secret-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "derived-secret-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

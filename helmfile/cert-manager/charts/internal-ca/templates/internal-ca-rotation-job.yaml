@@ -14,7 +14,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rotation
-          image: bitnami/kubectl:1.33.1
+          image: alpine/curl:8.14.1
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false

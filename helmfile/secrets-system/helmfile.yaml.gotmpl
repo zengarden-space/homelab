@@ -1,10 +1,15 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
 repositories:
   - name: external-secrets
     url: https://charts.external-secrets.io
 
 releases:
   - name: external-secrets
-    namespace: external-secrets-system
+    namespace: secrets-system
     chart: external-secrets/external-secrets
     version: 0.10.4
     values:
@@ -38,3 +43,10 @@ releases:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
+
+  - name: derived-secret-operator
+    namespace: secrets-system
+    chart: ./derived-secret-operator
+    values:
+      - masterPassword:
+          value: {{ .Values.derivedSecrets.masterPassword | quote }}
