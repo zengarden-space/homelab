@@ -46,8 +46,8 @@ spec:
         - name: GITEA_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "gitea-automation.fullname" . }}-admin
-              key: GITEA_ADMIN_PASSWORD
+              name: gitea-admin
+              key: adminPassword
         - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:

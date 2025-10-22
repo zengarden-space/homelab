@@ -11,11 +11,6 @@ releases:
   - name: mikrotik-creds
     namespace: external-dns
     chart: ./charts/mikrotik-creds
-    values:
-      - mikrotik:
-          baseUrl: {{ .Values.externalDns.mikrotikBaseUrl | quote }}
-          username: {{ .Values.externalDns.mikrotikUsername | quote }}
-          password: {{ .Values.externalDns.mikrotikPassword | quote }}
 
   - name: external-dns
     namespace: external-dns

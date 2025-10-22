@@ -1,6 +1,0 @@
-blade003 eviction
-
-message: 'The node was low on resource: ephemeral-storage. Threshold quantity: 1047819894,
-    available: 1555956Ki. Container mon was using 19348Ki, request is 0, has larger
-    consumption of ephemeral-storage. Container log-collector was using 844Ki, request
-    is 0, has larger consumption of ephemeral-storage. '

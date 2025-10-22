@@ -1,0 +1,4 @@
+apiVersion: v2
+name: gitea-derived-secrets
+description: Derived secrets for Gitea
+version: 1.0.0

@@ -10,8 +10,14 @@ repositories:
     url: https://pmint93.github.io/helm-charts
 
 releases:
+  - name: metabase-derived-secrets
+    namespace: metabase
+    chart: ./charts/metabase-derived-secrets
+
   - name: metabase
     namespace: metabase
+    needs:
+      - metabase-derived-secrets
     chart: pmint93/metabase
     version: 2.22.2
     values:
@@ -77,4 +83,5 @@ releases:
       - metabase:
           url: http://metabase.metabase.svc.cluster.local
           adminEmail: admin@example.com
-          adminPassword: {{ .Values.metabase.adminPassword | quote }}
+          adminPasswordSecret: metabase-admin
+          adminPasswordSecretKey: adminPassword

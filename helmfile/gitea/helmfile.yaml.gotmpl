@@ -8,15 +8,21 @@ repositories:
     url: https://dl.gitea.io/charts
 
 releases:
+  - name: gitea-derived-secrets
+    namespace: gitea
+    chart: ./charts/gitea-derived-secrets
+
   - name: gitea
     namespace: gitea
     chart: gitea/gitea
     version: v12.4.0
+    needs:
+      - gitea-derived-secrets
     values:
       - replicaCount: 1
         gitea:
           admin:
-            password: {{ .Values.gitea.password | quote }}
+            existingSecret: gitea-admin
           actions:
             enabled: true
         persistence:
@@ -92,12 +98,11 @@ releases:
             port: 3000
           admin:
             username: "gitea_admin"
-            password: {{ .Values.gitea.password | quote }}
+            existingSecret: gitea-admin
+            existingSecretKey: adminPassword
         github:
           token: {{ .Values.github.token | quote }}
           organization: "zengarden-space"
-        argocd:
-          webhookSecret: {{ .Values.gitea.argocd.webhookSecret | quote }}
         personalAccessTokens:
           tokens:
             gitea-automation-org-creator:

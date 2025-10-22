@@ -41,6 +41,3 @@ releases:
     chart: ./charts/letsencrypt-prod
     needs:
       - cert-manager
-    values:
-      - cloudflareToken: {{ .Values.letsEncrypt.cloudflareToken | quote }}
-        cloudflareAccount: {{ .Values.letsEncrypt.cloudflareAccount | quote }}

@@ -1,11 +1,11 @@
 helmfiles:
-  # Core infrastructure
-  - path: external-dns/helmfile.yaml.gotmpl
+  # Core systems
   - path: metallb-system/helmfile.yaml.gotmpl
-  - path: cert-manager/helmfile.yaml.gotmpl
-  - path: external-secrets-system/helmfile.yaml.gotmpl
+  - path: secrets-system/helmfile.yaml.gotmpl
   
   # Networking
+  - path: external-dns/helmfile.yaml.gotmpl
+  - path: cert-manager/helmfile.yaml.gotmpl
   - path: ingress-nginx/helmfile.yaml.gotmpl
   - path: external-tunnel/helmfile.yaml.gotmpl
 
