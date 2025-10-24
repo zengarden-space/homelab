@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTS_FILE="${SCRIPT_DIR}/hosts.yaml"
-PLAYBOOK_FILE="${SCRIPT_DIR}/install.yaml"
+PLAYBOOK_FILE="${SCRIPT_DIR}/partition-drives.yaml"
 
 # Check if required files exist
 if [[ ! -f "$HOSTS_FILE" ]]; then
@@ -16,7 +16,7 @@ if [[ ! -f "$HOSTS_FILE" ]]; then
 fi
 
 if [[ ! -f "$PLAYBOOK_FILE" ]]; then
-    echo "Error: install.yaml not found at $PLAYBOOK_FILE"
+    echo "Error: partition-drives.yaml not found at $PLAYBOOK_FILE"
     exit 1
 fi
 

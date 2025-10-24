@@ -5,7 +5,6 @@ bootstrapMaster:
       ansible_host: blade001
   vars:
     domain: zengarden.space
-    backup_s3_bucket: zengarden.space-cluster-backup
 
 masters:
   hosts:
@@ -17,7 +16,6 @@ masters:
       ansible_host: blade003
   vars:
     domain: zengarden.space
-    backup_s3_bucket: zengarden.space-cluster-backup
 
 workers:
   hosts:
@@ -29,7 +27,6 @@ workers:
       ansible_host: blade005
   vars:
     domain: zengarden.space
-    backup_s3_bucket: zengarden.space-cluster-backup
 
 pies:
   children:
@@ -39,4 +36,3 @@ pies:
   vars:
     k3s_version: v1.32.4+k3s1
     domain: zengarden.space
-    backup_s3_bucket: zengarden.space-cluster-backup

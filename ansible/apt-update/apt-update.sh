@@ -17,8 +17,8 @@ if [ ! -f "hosts.yaml" ]; then
     exit 1
 fi
 
-if [ ! -f "install.yaml" ]; then
-    echo -e "${RED}Error: install.yaml not found${NC}"
+if [ ! -f "apt-update.yaml" ]; then
+    echo -e "${RED}Error: apt-update.yaml not found${NC}"
     exit 1
 fi
 
@@ -36,7 +36,7 @@ fi
 
 # Run the installation playbook
 echo -e "${GREEN}Running system updates playbook...${NC}"
-ansible-playbook -v -i hosts.yaml install.yaml
+ansible-playbook -v -i hosts.yaml apt-update.yaml
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}System updates completed successfully!${NC}"

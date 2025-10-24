@@ -137,6 +137,7 @@
             - "kubernetes.default.svc"
             - "kubernetes.default.svc.cluster.local"
             - "kubernetes.{{ domain }}"  # External API endpoint
+            - "kubernetes.homelab.int.{{ domain }}"  # External API endpoint
           node-external-ip: "{{ ansible_default_ipv4.address }}"
           # Hardened security
           protect-kernel-defaults: true
@@ -149,6 +150,11 @@
             - 'audit-log-maxage=30'
             - 'audit-log-maxbackup=10'
             - 'audit-log-maxsize=100'
+          kube-apiserver-arg:
+            - "oidc-issuer-url=https://accounts.google.com"
+            - "oidc-client-id={{ google_oidc_client_id }}"
+            - "oidc-username-claim=email"
+            - "oidc-username-prefix="
           kube-controller-manager-arg:
             - 'terminated-pod-gc-threshold=10'
           kubelet-arg:
@@ -254,11 +260,10 @@
       when: "not helmExists.stat.exists"
       shell: |-
         set -euxo pipefail
-        curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
-        sudo apt-get install apt-transport-https --yes
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
-        sudo apt-get update
-        sudo apt-get install helm
+        curl https://get.helm.sh/helm-3.13.0-linux-arm64.tar.gz -o helm.tar.gz
+        tar -zxvf helm.tar.gz
+        sudo mv linux-arm64/helm /usr/local/bin/helm
+        rm -rf linux-arm64 helm.tar.gz
     - name: Check if cilium exists
       stat:
         path: /usr/local/bin/cilium
@@ -296,4 +301,127 @@
         
         kubectl get pods -n kube-system
 
-        kubectl wait pods --all -n kube-system --for=condition=Ready --timeout=20m
+        kubectl wait pods --all -n kube-system --for=condition=Ready --timeout=60m
+
+- name: Configure Google OIDC RBAC
+  become: true
+  hosts: bootstrapMaster
+  tasks:
+    - name: Create ClusterRoleBinding for Google admin user
+      shell: |-
+        set -euxo pipefail
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        kubectl apply -f - <<'EOF'
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: google-admin-alice
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - kind: User
+            name: {{ google_oidc_admin_email }}
+            apiGroup: rbac.authorization.k8s.io
+        EOF
+
+# language: yaml
+- name: Export admin kubeconfig and generate OIDC-only kubeconfig
+  hosts: bootstrapMaster
+  become: true
+  gather_facts: true
+  vars:
+    control_machine_home: "{{ lookup('env', 'HOME') }}"
+    kube_dest_dir: "{{ control_machine_home }}/.kube"
+    kube_dest_file: "{{ control_machine_home }}/.kube/config"
+    oauth_dest: "{{ control_machine_home }}/.kube/config-homelab"
+    oidc_issuer: https://accounts.google.com
+    oidc_user_name: google-oidc
+    oidc_context_name: homelab
+    external_api_server: "https://kubernetes.homelab.int.{{ domain }}:6443"
+
+  tasks:
+    - name: Read admin kubeconfig from k3s
+      slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: admin_kube_slurp
+      changed_when: false
+
+    - name: Parse admin kubeconfig YAML
+      set_fact:
+        admin_kube: "{{ (admin_kube_slurp.content | b64decode) | from_yaml }}"
+
+    - name: Ensure local kube dir exists on control machine
+      file:
+        path: "{{ kube_dest_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Write full-access admin kubeconfig to `{{ kube_dest_file }}`
+      copy:
+        content: "{{ admin_kube_slurp.content | b64decode }}"
+        dest: "{{ kube_dest_file }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Use OIDC client id from Ansible variable
+      set_fact:
+        oidc_client_id: "{{ google_oidc_client_id }}"
+        oidc_client_secret: "{{ google_oidc_client_secret }}"
+      when: google_oidc_client_id is defined and google_oidc_client_id != ''
+
+    - name: Build OIDC-only kubeconfig dictionary
+      set_fact:
+        oauth_kubecfg_dict:
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: "{{ admin_kube.clusters[0].name }}"
+              cluster:
+                server: "{{ external_api_server }}"
+                certificate-authority-data: "{{ admin_kube.clusters[0].cluster['certificate-authority-data'] }}"
+          users:
+            - name: "{{ oidc_user_name }}"
+              user:
+                exec:
+                  apiVersion: "client.authentication.k8s.io/v1"
+                  command: kubectl
+                  args:
+                    - oidc-login
+                    - get-token
+                    - "--oidc-issuer-url={{ oidc_issuer }}"
+                    - "--oidc-client-id={{ oidc_client_id }}"
+                    - "--oidc-client-secret={{ oidc_client_secret }}"
+                    - --oidc-extra-scope=openid
+                    - --oidc-extra-scope=email
+                    - --oidc-extra-scope=profile
+                  interactiveMode: IfAvailable
+          contexts:
+            - name: "{{ oidc_context_name }}"
+              context:
+                cluster: "{{ admin_kube.clusters[0].name }}"
+                user: "{{ oidc_user_name }}"
+          current-context: "{{ oidc_context_name }}"
+      when: oidc_client_id is defined and oidc_client_id != ''
+
+    - name: Ensure .kube dir exists on control machine
+      file:
+        path: "{{ control_machine_home }}/.kube"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+
+    - name: Write OIDC-only kubeconfig to `{{ oauth_dest }}`
+      copy:
+        content: "{{ oauth_kubecfg_dict | to_nice_yaml }}"
+        dest: "{{ oauth_dest }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: oidc_client_id is defined and oidc_client_id != ''
