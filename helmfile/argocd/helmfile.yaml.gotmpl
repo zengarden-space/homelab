@@ -1,8 +1,3 @@
-environments:
-  default:
-    values:
-      - env.yaml
----
 repositories:
   - name: argo
     url: https://argoproj.github.io/argo-helm
@@ -47,10 +42,25 @@ releases:
 
         configs:
           secret:
-            name: argocd-secrets
             createSecret: false
           params:
             server.insecure: true
+          cm:
+            # Google OAuth configuration
+            url: https://argocd.homelab.int.zengarden.space
+            dex.config: |
+              connectors:
+                - type: google
+                  id: google
+                  name: Google
+                  config:
+                    clientID: $argocd-google-oauth:clientId
+                    clientSecret: $argocd-google-oauth:clientSecret
+                    redirectURI: https://argocd.homelab.int.zengarden.space/api/dex/callback
+          rbac:
+            policy.default: role:readonly
+            policy.csv: |
+              g, oleksiy.pylypenko@gmail.com, role:admin
 
   - name: argocd-config
     namespace: argocd

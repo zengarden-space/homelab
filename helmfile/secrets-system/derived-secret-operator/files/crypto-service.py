@@ -106,10 +106,23 @@ class DerivedSecretService:
             
             binding = context_data[0]
             
-            # Shell-operator puts objects in 'objects' array for kubernetes bindings
-            objects = binding.get('objects', [])
+            # Shell-operator can send objects in two ways:
+            # 1. Single event: binding['object'] for Modified/Added/Deleted events
+            # 2. Synchronization: binding['objects'] array for initial sync
+            objects = []
+
+            if 'object' in binding:
+                # Single object event (Modified, Added, Deleted)
+                objects = [{'object': binding['object']}]
+            elif 'objects' in binding:
+                # Multiple objects from synchronization
+                objects = binding['objects']
+
             if not objects:
                 print("WARNING: No objects in binding context", file=sys.stderr)
+                print("---")
+                print(binding_context)
+                print("---")
                 return
             
             # Process each object (there may be multiple DerivedSecrets)

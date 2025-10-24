@@ -44,7 +44,7 @@ gitea:
     namespace: "gitea"      # Gitea namespace
     port: 3000             # Gitea service port
   admin:
-    username: "gitea_admin" # Admin username
+    username: "admin" # Admin username
     # Password is read from gitea-admin-secret
 ```
 
@@ -63,7 +63,7 @@ personalAccessTokens:
   enabled: true
   tokens:
     org-creator:
-      user: gitea_admin
+      user: admin
       scopes: "write:organization,write:repository"
 ```
 

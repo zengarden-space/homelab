@@ -1,0 +1,4 @@
+apiVersion: v2
+name: secrets-source
+description: ClusterSecretStore to access secrets namespace
+version: 1.0.0

@@ -16,22 +16,26 @@ gitea:
     namespace: "gitea"
     port: 3000
   admin:
-    username: ""
-    password: ""  # Admin password - will be provided via values
+    username: "admin"
+    # Admin password comes from DerivedSecret: gitea-admin
 
 # GitHub configuration for sync
 github:
-  token: ""  # GitHub token - will be provided via values
   organization: "zengarden-space"
-
-# ArgoCD configuration for webhooks
-argocd:
-  webhookSecret: ""  # ArgoCD webhook secret - will be provided via values
 
 # Personal Access Tokens configuration
 personalAccessTokens:
   enabled: true
-  tokens: {}
+  tokens:
+    gitea-automation-org-creator:
+      user: admin
+      scopes: "write:organization,write:repository"
+    gitea-automation-package-writer:
+      user: admin
+      scopes: "write:package"
+    gitea-automation-content-writer:
+      user: admin
+      scopes: "write:repository"
       
 # Job configuration
 job:
@@ -39,7 +43,7 @@ job:
     pullPolicy: IfNotPresent  # Used for both main and init containers
   
   restartPolicy: Never
-  backoffLimit: 3
+  backoffLimit: 10
   
   securityContext:
     allowPrivilegeEscalation: false

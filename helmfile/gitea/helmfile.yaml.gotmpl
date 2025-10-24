@@ -1,8 +1,4 @@
-environments:
-  default:
-    values:
-      - env.yaml
----
+
 repositories:
   - name: gitea
     url: https://dl.gitea.io/charts
@@ -85,32 +81,3 @@ releases:
     chart: ./charts/gitea-automation
     needs:
       - gitea
-    values:
-      - organization:
-          name: "zengarden-space"
-          description: "ZenGarden Space Organization"
-          website: "https://zengarden.space"
-          visibility: "public"
-        gitea:
-          service:
-            name: "gitea-http"
-            namespace: "gitea"
-            port: 3000
-          admin:
-            username: "gitea_admin"
-            existingSecret: gitea-admin
-            existingSecretKey: adminPassword
-        github:
-          token: {{ .Values.github.token | quote }}
-          organization: "zengarden-space"
-        personalAccessTokens:
-          tokens:
-            gitea-automation-org-creator:
-              user: gitea_admin
-              scopes: "write:organization,write:repository"
-            gitea-automation-package-writer:
-              user: gitea_admin
-              scopes: "write:package"
-            gitea-automation-content-writer:
-              user: gitea_admin
-              scopes: "write:repository"

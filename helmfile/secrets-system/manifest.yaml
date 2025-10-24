@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secrets
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secrets
+  namespace: secrets
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: secrets
+  namespace: secrets
+rules:
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - selfsubjectrulesreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: secrets
+  namespace: secrets
+subjects:
+  - kind: ServiceAccount
+    name: secrets
+    namespace: secrets
+roleRef:
+  kind: Role
+  name: secrets
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: secrets
+  namespace: secrets
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: secrets
+      auth:
+        serviceAccount:
+          name: secrets
+          namespace: secrets
+      server:
+        caProvider:
+          type: "ConfigMap"
+          name: "kube-root-ca.crt"
+          key: "ca.crt"
+          namespace: "kube-system"

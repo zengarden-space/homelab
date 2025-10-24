@@ -44,6 +44,12 @@ releases:
             seccompProfile:
               type: RuntimeDefault
 
+  - name: secrets-source
+    namespace: secrets
+    chart: ./secrets-source
+    needs:
+      - secrets-system/external-secrets
+
   - name: derived-secret-operator
     namespace: secrets-system
     chart: ./derived-secret-operator
