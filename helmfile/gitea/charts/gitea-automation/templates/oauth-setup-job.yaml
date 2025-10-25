@@ -1,0 +1,123 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gitea-automation.fullname" . }}-oauth-setup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-automation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oauth-setup
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "gitea-automation.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: oauth-setup
+    spec:
+      restartPolicy: OnFailure
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      initContainers:
+      - name: install-dependencies
+        image: mcr.microsoft.com/playwright:v1.40.0-jammy
+        imagePullPolicy: IfNotPresent
+        command: ['/bin/sh', '-c']
+        args:
+          - |
+            set -ex
+            echo "[init] Copying application files to writable directory..."
+            cp -v /app-readonly/package.json /app/package.json
+            cp -v /app-readonly/setup-google-oauth.js /app/setup-google-oauth.js
+            cd /app
+            ls -la
+            echo "[init] Installing Node.js dependencies..."
+            npm install
+            echo "[init] Installing Playwright browsers..."
+            npx playwright install chromium
+            echo "[init] Verifying browser installation..."
+            ls -la /home/pwuser/.cache/
+            echo "[init] ✓ Dependencies installed successfully"
+        env:
+        - name: PLAYWRIGHT_BROWSERS_PATH
+          value: "/home/pwuser/.cache"
+        volumeMounts:
+        - name: app-readonly
+          mountPath: /app-readonly
+        - name: app-workdir
+          mountPath: /app
+        - name: playwright-cache
+          mountPath: /home/pwuser/.cache
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+      containers:
+      - name: setup-oauth
+        image: mcr.microsoft.com/playwright:v1.40.0-jammy
+        imagePullPolicy: IfNotPresent
+        command: ['/bin/sh', '-c']
+        args:
+          - |
+            set -ex
+            cd /app
+            node setup-google-oauth.js
+        env:
+        - name: GITEA_URL
+          value: "https://gitea.homelab.int.zengarden.space"
+        - name: GITEA_ADMIN_USERNAME
+          value: {{ .Values.gitea.admin.username | quote }}
+        - name: GITEA_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gitea-admin
+              key: password
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-google-oauth
+              key: clientId
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-google-oauth
+              key: clientSecret
+        - name: MAX_RETRIES
+          value: "60"
+        - name: RETRY_DELAY
+          value: "10000"
+        - name: PLAYWRIGHT_BROWSERS_PATH
+          value: "/home/pwuser/.cache"
+        - name: NODE_PATH
+          value: "/app/node_modules"
+        volumeMounts:
+        - name: app-workdir
+          mountPath: /app
+        - name: playwright-cache
+          mountPath: /home/pwuser/.cache
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+      volumes:
+      - name: app-readonly
+        configMap:
+          name: {{ include "gitea-automation.fullname" . }}-oauth-setup
+      - name: app-workdir
+        emptyDir: {}
+      - name: playwright-cache
+        emptyDir: {}

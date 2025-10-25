@@ -1,0 +1,20 @@
+proxy:
+  mikrotik-proxy.homelab.int.zengarden.space:
+    to:
+      url: http://192.168.77.1
+      username: admin
+      password: {{ mikrotik_password }}
+    mode: WATCH
+    restrictions:
+      GET:
+        - /rest/ip/dns/static
+        - /rest/ip/dns/static/**
+        - /rest/system/resource
+      POST:
+        - /rest/ip/dns/static
+      PUT:
+        - /rest/ip/dns/static/*
+      PATCH:
+        - /rest/ip/dns/static/*
+      DELETE:
+        - /rest/ip/dns/static/*

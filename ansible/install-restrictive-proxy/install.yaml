@@ -1,0 +1,148 @@
+---
+- name: Install Restrictive HTTP Proxy
+  hosts: proxy_nodes
+  become: true
+  vars:
+    app_dir: /opt/restrictive-proxy
+    service_name: restrictive-proxy
+    proxy_user: restrictive-proxy
+
+  tasks:
+    - name: Ping hosts
+      ping:
+
+    - name: Install Node.js and npm
+      apt:
+        name:
+          - nodejs
+          - npm
+        state: present
+        update_cache: yes
+
+    - name: Create service user
+      user:
+        name: "{{ proxy_user }}"
+        system: yes
+        shell: /bin/false
+        home: "{{ app_dir }}"
+        create_home: no
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ proxy_user }}"
+        group: "{{ proxy_user }}"
+        mode: '0755'
+
+    - name: Copy application files
+      copy:
+        src: "app/{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        owner: "{{ proxy_user }}"
+        group: "{{ proxy_user }}"
+        mode: '0644'
+      loop:
+        - package.json
+        - server.js
+      notify:
+        - Restart restrictive-proxy
+
+    - name: Make server.js executable
+      file:
+        path: "{{ app_dir }}/server.js"
+        mode: '0755'
+
+    - name: Install npm dependencies
+      command:
+        cmd: npm install --production
+        chdir: "{{ app_dir }}"
+      register: npm_install_result
+      changed_when: npm_install_result.rc == 0
+      notify:
+        - Restart restrictive-proxy
+
+    - name: Check npm install output
+      debug:
+        var: npm_install_result
+
+    - name: Verify node_modules exists
+      stat:
+        path: "{{ app_dir }}/node_modules"
+      register: node_modules_stat
+
+    - name: Fail if node_modules missing
+      fail:
+        msg: "node_modules directory is missing after npm install"
+      when: not node_modules_stat.stat.exists
+
+    - name: Fix ownership of node_modules
+      file:
+        path: "{{ app_dir }}/node_modules"
+        owner: "{{ proxy_user }}"
+        group: "{{ proxy_user }}"
+        recurse: yes
+        state: directory
+
+    - name: Template proxy configuration with credentials
+      template:
+        src: restrictive-proxy.conf.j2
+        dest: "{{ config_path }}"
+        owner: "{{ proxy_user }}"
+        group: "{{ proxy_user }}"
+        mode: '0400'
+      notify:
+        - Restart restrictive-proxy
+
+    - name: Create systemd service file
+      copy:
+        content: |
+          [Unit]
+          Description=Restrictive HTTP Proxy
+          After=network.target
+
+          [Service]
+          Type=simple
+          User={{ proxy_user }}
+          Group={{ proxy_user }}
+          WorkingDirectory={{ app_dir }}
+          ExecStart=/usr/bin/node {{ app_dir }}/server.js
+          Restart=always
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier={{ service_name }}
+          Environment="PORT={{ proxy_port }}"
+          Environment="CONFIG_PATH={{ config_path }}"
+
+          # Security settings
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          ReadWritePaths={{ app_dir }}
+          
+          [Install]
+          WantedBy=multi-user.target
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart restrictive-proxy
+
+    - name: Enable and start service
+      systemd:
+        name: "{{ service_name }}"
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart restrictive-proxy
+      systemd:
+        name: "{{ service_name }}"
+        state: restarted

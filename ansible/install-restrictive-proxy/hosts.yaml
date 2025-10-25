@@ -1,0 +1,11 @@
+proxy_nodes:
+  hosts:
+    blade001:
+      ansible_user: oleksiyp
+      ansible_host: blade001
+    blade002:
+      ansible_user: oleksiyp
+      ansible_host: blade002
+  vars:
+    proxy_port: 5555
+    config_path: /etc/restrictive-proxy.conf

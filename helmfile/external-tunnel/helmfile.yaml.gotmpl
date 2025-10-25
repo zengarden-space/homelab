@@ -1,8 +1,3 @@
-environments:
-  default:
-    values:
-      - env.yaml
----
 repositories:
   - name: ingress-nginx
     url: https://kubernetes.github.io/ingress-nginx
@@ -43,6 +38,8 @@ releases:
   - name: cloudflare-tunnel
     namespace: external-tunnel
     chart: ./charts/cloudflare-tunnel
+    values:
+      - cloudflare:
           ingress:
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
               hostname: "zengarden.space"

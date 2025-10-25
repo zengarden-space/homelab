@@ -1,0 +1,14 @@
+{
+  "name": "restrictive-proxy",
+  "version": "1.0.0",
+  "description": "HTTP proxy with path restrictions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "js-yaml": "^4.1.0",
+    "minimatch": "^9.0.3"
+  }
+}

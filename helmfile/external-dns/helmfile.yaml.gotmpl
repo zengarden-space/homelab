@@ -1,22 +1,11 @@
-environments:
-  default:
-    values:
-      - env.yaml
----
 repositories:
   - name: external-dns
     url: https://kubernetes-sigs.github.io/external-dns/
 
 releases:
-  - name: mikrotik-creds
-    namespace: external-dns
-    chart: ./charts/mikrotik-creds
-
   - name: external-dns
     namespace: external-dns
     chart: external-dns/external-dns
-    needs:
-     - mikrotik-creds
     version: 1.15.0
     values:
       - interval: 5s
@@ -56,25 +45,7 @@ releases:
               - name: MIKROTIK_DEFAULT_COMMENT
                 value: Managed by ExternalDNS
               - name: MIKROTIK_BASEURL
-                valueFrom:
-                  secretKeyRef:
-                    name: mikrotik-credentials
-                    key: MIKROTIK_BASEURL
-              - name: MIKROTIK_USERNAME
-                valueFrom:
-                  secretKeyRef:
-                    name: mikrotik-credentials
-                    key: MIKROTIK_USERNAME
-              - name: MIKROTIK_PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: mikrotik-credentials
-                    key: MIKROTIK_PASSWORD
-              - name: MIKROTIK_SKIP_TLS_VERIFY
-                valueFrom:
-                  secretKeyRef:
-                    name: mikrotik-credentials
-                    key: MIKROTIK_SKIP_TLS_VERIFY
+                value: http://mikrotik-proxy.homelab.int.zengarden.space
             livenessProbe:
               httpGet:
                 path: /healthz

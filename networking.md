@@ -10,11 +10,11 @@
 │     192.168.99.1   - MikroTik gateway                           │
 │   192.168.77.0/24  - K3s Cluster (VLAN77)                       │
 │     192.168.77.1   - MikroTik gateway                           │
-│     192.168.77.11  - blade001 (Compute Blade CM5)               │
-│     192.168.77.12  - blade002 (Compute Blade CM5)               │
-│     192.168.77.13  - blade003 (Compute Blade CM5)               │
-│     192.168.77.14  - blade004 (Compute Blade CM5)               │
-│     192.168.77.15  - blade005 (Compute Blade CM5, master)       │
+│     192.168.77.170 - blade001 (Compute Blade CM5)               │
+│     192.168.77.171 - blade002 (Compute Blade CM5)               │
+│     192.168.77.172 - blade003 (Compute Blade CM5)               │
+│     192.168.77.173 - blade004 (Compute Blade CM5)               │
+│     192.168.77.174 - blade005 (Compute Blade CM5, master)       │
 │   192.168.100.0/24 - Management VLAN (VLAN100)                  │
 │     192.168.100.1  - MikroTik (admin access)                    │
 │     192.168.100.10 - Mac Mini (admin workstation)               │

@@ -132,6 +132,9 @@ class DerivedSecretService:
                 
         except Exception as e:
             print(f"ERROR in process_derived_secret: {e}", file=sys.stderr)
+            print("---")
+            print(binding_context)
+            print("---")
             import traceback
             traceback.print_exc()
             raise

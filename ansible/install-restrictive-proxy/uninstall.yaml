@@ -1,0 +1,43 @@
+---
+- name: Uninstall Restrictive HTTP Proxy
+  hosts: proxy_nodes
+  become: true
+  vars:
+    app_dir: /opt/restrictive-proxy
+    service_name: restrictive-proxy
+    proxy_user: restrictive-proxy
+    config_path: /etc/restrictive-proxy.conf
+
+  tasks:
+    - name: Stop and disable service
+      systemd:
+        name: "{{ service_name }}"
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Remove systemd service file
+      file:
+        path: "/etc/systemd/system/{{ service_name }}.service"
+        state: absent
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Remove application directory
+      file:
+        path: "{{ app_dir }}"
+        state: absent
+
+    - name: Remove configuration file
+      file:
+        path: "{{ config_path }}"
+        state: absent
+
+    - name: Remove service user
+      user:
+        name: "{{ proxy_user }}"
+        state: absent
+        remove: yes
+
