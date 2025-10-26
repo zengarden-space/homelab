@@ -3,6 +3,10 @@ environments:
     values:
       - env.yaml
 ---
+helmDefaults:
+  wait: true
+  timeout: 600
+
 repositories: 
   - name: my-gotify
     url: https://pmoscode-helm.github.io/gotify/

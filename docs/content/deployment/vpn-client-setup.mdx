@@ -1,0 +1,405 @@
+# Getting Started
+
+## Connecting to the Homelab
+
+This guide walks you through connecting to the homelab platform for the first time. You'll set up VPN access, authenticate with Google, and gain access to all core services.
+
+## Prerequisites
+
+Before you begin, ensure you receive from the administrator:
+
+1. **WireGuard VPN configuration file** - Place this file at `/etc/wireguard/<username>-vpn.conf` (or similar name)
+2. **kubectl configuration file** - Merge this with your `~/.kube/config`
+
+## Step-by-Step Setup
+
+### 1. Install WireGuard
+
+WireGuard provides secure VPN access to the homelab network.
+
+**macOS:**
+```bash
+brew install wireguard-tools
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update
+sudo apt install wireguard wireguard-tools
+```
+
+**Linux (Fedora/RHEL):**
+```bash
+sudo dnf install wireguard-tools
+```
+
+**Windows:**
+Download from [wireguard.com/install](https://www.wireguard.com/install/)
+
+---
+
+### 2. Install kubectl
+
+kubectl is the Kubernetes command-line tool for interacting with the cluster.
+
+**macOS:**
+```bash
+brew install kubectl
+```
+
+**Linux:**
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+```
+
+**Windows:**
+```powershell
+choco install kubernetes-cli
+```
+
+---
+
+### 3. Install Krew (kubectl plugin manager)
+
+Krew manages kubectl plugins. We'll use it to install the OIDC login plugin.
+
+**macOS/Linux:**
+```bash
+(
+  set -x; cd "$(mktemp -d)" &&
+  OS="$(uname | tr '[:upper:]' '[:lower:]')" &&
+  ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')" &&
+  KREW="krew-${OS}_${ARCH}" &&
+  curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/latest/download/${KREW}.tar.gz" &&
+  tar zxvf "${KREW}.tar.gz" &&
+  ./"${KREW}" install krew
+)
+```
+
+Add krew to your PATH (add to `~/.bashrc`, `~/.zshrc`, or equivalent):
+```bash
+export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
+```
+
+**Windows:**
+See [krew.sigs.k8s.io/docs/user-guide/setup/install](https://krew.sigs.k8s.io/docs/user-guide/setup/install/)
+
+---
+
+### 4. Install kubectl oidc-login plugin
+
+This plugin enables Google OIDC authentication for kubectl.
+
+```bash
+kubectl krew install oidc-login
+```
+
+---
+
+### 5. Configure VPN
+
+Place your VPN configuration file in the WireGuard directory:
+
+**macOS/Linux:**
+```bash
+sudo cp <username>-vpn.conf /etc/wireguard/
+sudo chmod 600 /etc/wireguard/<username>-vpn.conf
+```
+
+---
+
+### 6. Configure kubectl
+
+Merge the provided kubeconfig with your existing configuration:
+
+**Backup existing config:**
+```bash
+cp ~/.kube/config ~/.kube/config.backup
+```
+
+**Merge configs:**
+```bash
+# If you received a standalone kubeconfig file:
+export KUBECONFIG=~/.kube/config:~/path/to/homelab-kubeconfig.yaml
+kubectl config view --flatten > ~/.kube/config.tmp
+mv ~/.kube/config.tmp ~/.kube/config
+chmod 600 ~/.kube/config
+```
+
+Or simply copy the provided config to `~/.kube/config` if you don't have an existing configuration.
+
+---
+
+### 7. Connect to VPN
+
+Start the WireGuard VPN connection:
+
+**macOS/Linux:**
+```bash
+sudo wg-quick up <username>-vpn
+```
+
+**Verify connection:**
+```bash
+sudo wg show
+```
+
+You should see connection details including peer information and handshake timestamps.
+
+**To disconnect later:**
+```bash
+sudo wg-quick down <username>-vpn
+```
+
+---
+
+### 8. Verify Kubernetes Access
+
+Test your kubectl access. This will trigger Google OAuth authentication:
+
+```bash
+kubectl get pods -A
+```
+
+**Expected behavior:**
+1. Your browser opens automatically
+2. Google login page appears
+3. Authenticate with your Google account
+4. You'll see a success message
+5. kubectl displays all pods across all namespaces
+
+**Troubleshooting:**
+- If browser doesn't open, copy the URL from terminal and paste into your browser
+- Ensure you're using a Google account authorized by the homelab administrator
+- Check VPN is connected: `sudo wg show`
+
+---
+
+### 9. Access Gitea (Git Server)
+
+Gitea is the internal Git server and CI/CD platform.
+
+1. **Navigate to:** [https://gitea.homelab.int.zengarden.space/](https://gitea.homelab.int.zengarden.space/)
+2. **Click "Sign in with Google"**
+3. **Create account:**
+   - Username format: `<firstname><first_letter_lastname>`
+   - Example: For "John Doe" use `johnd`
+4. **Request access:** Contact the administrator to be added to the `zengarden-space` organization
+
+**Note:** You won't have repository access until added to the organization.
+
+---
+
+### 10. Request Organization Membership
+
+Contact the homelab administrator with:
+- Your Gitea username
+- Your Google email address
+- Brief description of what you'd like to work on
+
+The administrator will add you to the `zengarden-space` organization, granting you access to repositories and CI/CD pipelines.
+
+---
+
+### 11. Access ArgoCD (GitOps)
+
+ArgoCD manages continuous deployment of applications to the cluster.
+
+1. **Navigate to:** [https://argocd.homelab.int.zengarden.space/](https://argocd.homelab.int.zengarden.space/)
+2. **Click "Login via Google"**
+3. **Authenticate** with your Google account
+
+You'll see all applications deployed in the cluster and their sync status.
+
+**Permissions:**
+- Read-only access by default
+- Write access granted on request basis
+
+---
+
+### 12. Access Metabase (Analytics)
+
+Metabase provides business intelligence and analytics dashboards.
+
+1. **Navigate to:** [https://metabase.homelab.int.zengarden.space/](https://metabase.homelab.int.zengarden.space/)
+2. **Click "Sign in with Google"**
+3. **Authenticate** with your Google account
+
+**Available data sources:**
+- PostgreSQL databases managed by CloudNativePG
+- Automatically discovered databases via custom operator
+
+---
+
+## Quick Reference
+
+### VPN Commands
+
+```bash
+# Connect to VPN
+sudo wg-quick up <username>-vpn
+
+# Disconnect from VPN
+sudo wg-quick down <username>-vpn
+
+# Check VPN status
+sudo wg show
+
+# View VPN configuration
+sudo cat /etc/wireguard/<username>-vpn.conf
+```
+
+### kubectl Commands
+
+```bash
+# View all pods
+kubectl get pods -A
+
+# View cluster nodes
+kubectl get nodes
+
+# Check your authentication
+kubectl auth whoami
+
+# Switch context (if multiple clusters)
+kubectl config get-contexts
+kubectl config use-context homelab
+
+# View cluster info
+kubectl cluster-info
+```
+
+### Service URLs
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Gitea** | [gitea.homelab.int.zengarden.space](https://gitea.homelab.int.zengarden.space/) | Git server & CI/CD |
+| **ArgoCD** | [argocd.homelab.int.zengarden.space](https://argocd.homelab.int.zengarden.space/) | GitOps deployment |
+| **Metabase** | [metabase.homelab.int.zengarden.space](https://metabase.homelab.int.zengarden.space/) | Analytics & BI |
+
+---
+
+## Troubleshooting
+
+### VPN Connection Issues
+
+**Problem:** `wg-quick up` fails
+
+**Solutions:**
+```bash
+# Check WireGuard is installed
+which wg
+
+# Verify config file exists and has correct permissions
+ls -la /etc/wireguard/<username>-vpn.conf
+
+# Check for port conflicts
+sudo lsof -i :51820
+
+# View system logs
+sudo journalctl -u wg-quick@<username>-vpn -f
+```
+
+---
+
+### kubectl Authentication Issues
+
+**Problem:** `kubectl get pods` returns authentication error
+
+**Solutions:**
+```bash
+# Verify kubeconfig
+kubectl config view
+
+# Check current context
+kubectl config current-context
+
+# Manually trigger OIDC login
+kubectl oidc-login setup --oidc-issuer-url=https://accounts.google.com
+
+# Remove cached credentials
+rm ~/.kube/cache/oidc-login/*
+```
+
+---
+
+### Browser Doesn't Open for OAuth
+
+**Problem:** OIDC authentication doesn't open browser
+
+**Solutions:**
+1. Copy the URL from terminal output
+2. Paste into your browser manually
+3. Complete authentication
+4. Return to terminal
+
+**Permanent fix (optional):**
+```bash
+# Set default browser (macOS)
+export BROWSER=open
+
+# Set default browser (Linux)
+export BROWSER=xdg-open
+```
+
+---
+
+### Cannot Access Internal Services
+
+**Problem:** `https://gitea.homelab.int.zengarden.space` not accessible
+
+**Checklist:**
+1. **VPN connected:** `sudo wg show` should show active connection
+2. **DNS resolution:** `nslookup gitea.homelab.int.zengarden.space`
+3. **Network connectivity:** `ping 192.168.77.1`
+4. **Service status:** `kubectl -n gitea get pods`
+
+---
+
+## Security Notes
+
+### VPN Configuration
+
+- Keep your VPN configuration file secure
+- Do not commit VPN configs to version control
+- VPN configuration includes your private key
+- If compromised, contact administrator immediately
+
+### kubeconfig
+
+- Store kubeconfig in `~/.kube/config` with `0600` permissions
+- Never commit kubeconfig to version control
+- Contains cluster certificates and authentication details
+
+### Google OAuth
+
+- Use a personal or work Google account
+- Only authorized email addresses can access services
+- OAuth tokens cached in `~/.kube/cache/`
+- Tokens expire and auto-refresh
+
+---
+
+## Next Steps
+
+Once connected, explore:
+
+1. **[Core Platform](/deployment/core-platform)** - Understand platform services
+2. **[Applications](/deployment/applications)** - Deploy your first application
+3. **[Operations](/operations)** - Learn about monitoring and maintenance
+
+---
+
+## Getting Help
+
+If you encounter issues:
+
+1. Check this troubleshooting section first
+2. Review service logs: `kubectl logs -n <namespace> <pod>`
+3. Contact the homelab administrator
+4. Join the team communication channel
+
+---
+
+*Welcome to the homelab! You're now connected to a production-grade Kubernetes platform.*

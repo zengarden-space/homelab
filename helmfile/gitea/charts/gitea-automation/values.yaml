@@ -8,7 +8,7 @@ domain: zengarden.space
 # Organization configuration
 organization:
   name: "zengarden-space"
-  description: "ZenGarden Space Organization"
+  description: "zengarden.space organization"
   website: ""  # Set dynamically via helmfile
   visibility: "public"
 

@@ -47,7 +47,7 @@ This homelab implements **security by default** with multiple layers of protecti
 └─────────────────────────────────────────┘
 ┌─────────────────────────────────────────┐
 │ Layer 1: Network Segmentation           │
-│  - VLAN isolation                       │
+│  - Bridge-based network isolation       │
 │  - Stateful firewall (MikroTik)         │
 │  - VPN access control                   │
 └─────────────────────────────────────────┘
@@ -55,80 +55,76 @@ This homelab implements **security by default** with multiple layers of protecti
 
 ## Layer 1: Network Segmentation
 
-### VLAN Isolation
+### Network Isolation
 
-**Design Rationale**: Isolate trust zones to limit blast radius
+**Design Rationale**: Isolate trust zones to limit blast radius using bridge-based segmentation
 
-| VLAN | Purpose | Trust Level | Access Policy |
-|------|---------|-------------|---------------|
-| **VLAN77** (Cluster) | K3s nodes | Medium | Internet yes, VLAN88 no, VLAN100 no |
-| **VLAN88** (Home) | Personal devices | Low | Internet yes, VLAN77:80/443 only |
-| **VLAN100** (Management) | Admin workstation | High | All networks (no inbound) |
-| **WireGuard VPN** | Remote access | Medium | VLAN77 + pods, no VLAN88/100 |
+| Network | CIDR | Purpose | Trust Level | Access Policy |
+|---------|------|---------|-------------|---------------|
+| **Homelab** | 192.168.77.0/24 | K3s cluster nodes | Medium | Internet yes, Home no |
+| **Home** | 192.168.88.0/24 | Personal devices | Low | Internet yes, Homelab ports 22/80/443 only |
+| **WireGuard VPN** | 192.168.216.0/24 | Remote access | Medium | Homelab + pods (peer-restricted) |
+
+**Network Architecture:**
+- Simple two-bridge design (bridge-home, bridge-homelab)
+- Hardware offload enabled on all bridge ports for performance
 
 ### Firewall Rules (MikroTik)
 
 **Default Policy**: Deny all, explicit allow
 
-**VLAN77 (Cluster) Rules:**
+**Interface Lists:**
 ```routeros
-# Allow established/related connections
-/ip firewall filter add chain=forward connection-state=established,related action=accept
+/interface list
+add name=LAN comment="Local networks"
+add name=WAN comment="Internet-facing interfaces"
 
-# Allow VLAN100 (management) to VLAN77 (cluster)
-/ip firewall filter add chain=forward src-address=192.168.100.0/24 dst-address=192.168.77.0/24 action=accept
+/interface list member
+add list=LAN interface=bridge-home
+add list=LAN interface=bridge-homelab
+add list=WAN interface=pppoe-out1
+```
 
-# Allow VLAN88 (home) to VLAN77 ports 80,443 only (web services)
-/ip firewall filter add chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=80,443 action=accept
+**Forward Chain Rules:**
+```routeros
+# Fasttrack established/related connections (hardware offload)
+/ip firewall filter add action=fasttrack-connection chain=forward connection-state=established,related hw-offload=yes
+/ip firewall filter add action=accept chain=forward connection-state=established,related,untracked
+/ip firewall filter add action=drop chain=forward connection-state=invalid
 
-# Allow WireGuard VPN to VLAN77
-/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.77.0/24 action=accept
+# Drop WAN → LAN if not DSTNATed
+/ip firewall filter add action=drop chain=forward connection-state=new connection-nat-state=!dstnat in-interface-list=WAN
 
-# Allow WireGuard VPN to pod network (10.42.0.0/16)
-/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=10.42.0.0/16 action=accept
+# Network segmentation rules
+/ip firewall filter add action=accept chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=22,80,443 comment="Allow Home → Homelab (SSH,HTTP,HTTPS)"
+/ip firewall filter add action=drop chain=forward dst-address=192.168.77.0/24 src-address=192.168.88.0/24 comment="Block Home → Homelab (other)"
+/ip firewall filter add action=drop chain=forward src-address=192.168.77.0/24 dst-address=192.168.88.0/24 comment="Block Homelab → Home"
 
-# Allow WireGuard VPN to service network (10.43.0.0/16)
-/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=10.43.0.0/16 action=accept
+# Allow LAN → Internet
+/ip firewall filter add action=accept chain=forward src-address=192.168.77.0/24 out-interface-list=WAN comment="Allow Homelab → Internet"
+/ip firewall filter add action=accept chain=forward src-address=192.168.88.0/24 out-interface-list=WAN comment="Allow Home → Internet"
 
-# Block VLAN88 to VLAN77 (other ports)
-/ip firewall filter add chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 action=drop
-
-# Block all to VLAN100 (management isolation)
-/ip firewall filter add chain=forward dst-address=192.168.100.0/24 action=drop
-
-# Allow VLAN77 to internet
-/ip firewall filter add chain=forward src-address=192.168.77.0/24 out-interface=eth1 action=accept
+# Drop VPN → Home (address list controlled)
+/ip firewall filter add action=drop chain=forward src-address=192.168.216.0/24 dst-address-list=!vpn-allowed comment="Drop back-to-home VPN → LAN"
 
 # Default drop
-/ip firewall filter add chain=forward action=drop
+/ip firewall filter add action=drop chain=forward comment="Drop all remaining"
 ```
 
-**VLAN100 (Management) Rules:**
+**Input Chain Protection:**
 ```routeros
-# Allow VLAN100 to all destinations (admin access)
-/ip firewall filter add chain=forward src-address=192.168.100.0/24 action=accept
-
-# Block all inbound to VLAN100 (no compromise path)
-/ip firewall filter add chain=forward dst-address=192.168.100.0/24 action=drop
-```
-
-**WireGuard VPN Rules:**
-```routeros
-# Block WireGuard VPN to VLAN88 (home network)
-/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.88.0/24 action=drop
-
-# Block WireGuard VPN to VLAN100 (management)
-/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.100.0/24 action=drop
+/ip firewall filter add action=accept chain=input connection-state=established,related,untracked
+/ip firewall filter add action=drop chain=input connection-state=invalid
+/ip firewall filter add action=accept chain=input protocol=icmp
+/ip firewall filter add action=accept chain=input in-interface-list=LAN
+/ip firewall filter add action=drop chain=input
 ```
 
 ### NAT Configuration
 
 ```routeros
 # Masquerade outbound traffic to internet
-/ip firewall nat add chain=srcnat out-interface=eth1 action=masquerade
-
-# Port forwarding for WireGuard VPN
-/ip firewall nat add chain=dstnat protocol=udp dst-port=51820 to-addresses=192.168.77.174 to-ports=51820
+/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="Masquerade to Internet"
 ```
 
 ## Layer 2: Cluster Network Security
@@ -668,8 +664,8 @@ groups:
 | **Leaked credentials** | Restrictive proxy limits blast radius, secrets rotation |
 | **Network sniffing** | TLS everywhere, optional WireGuard pod-to-pod encryption |
 | **Malicious container image** | Pod Security Admission prevents dangerous containers, admission controllers |
-| **VLAN hopping** | Properly configured switch (VLAN tagging), firewall rules |
-| **Admin workstation compromise** | VLAN100 isolated (no inbound), VPN instead of direct access |
+| **Bridge hopping** | Bridge-based network isolation, firewall rules enforce segmentation |
+| **Admin workstation compromise** | VPN instead of direct access, firewall protection |
 | **MikroTik admin leak** | Restrictive proxy limits API access to DNS only |
 | **Secrets in Git** | Never committed (`.gitignore`), external secrets, DerivedSecrets |
 
@@ -696,7 +692,7 @@ groups:
 4. **K04 - Lack of Centralized Policy Enforcement**: PSA, NetworkPolicy, admission controllers
 5. **K05 - Inadequate Logging**: Audit logs, metrics, alerting
 6. **K06 - Broken Authentication**: OIDC, mTLS (service mesh optional)
-7. **K07 - Missing Network Segmentation**: VLANs, NetworkPolicy, firewall
+7. **K07 - Missing Network Segmentation**: Bridge isolation, NetworkPolicy, firewall
 8. **K08 - Secrets Management**: External Secrets, DerivedSecrets, encryption at rest
 9. **K09 - Misconfigured Cluster**: Hardened K3s, regular updates
 10. **K10 - Outdated Components**: Update strategy, vulnerability scanning
@@ -742,7 +738,7 @@ groups:
 
 This homelab implements **production-grade security** through:
 
-1. **Network segmentation** (VLANs, firewall, VPN)
+1. **Network segmentation** (bridge isolation, firewall, VPN)
 2. **Cluster hardening** (PSA, RBAC, secrets encryption)
 3. **Network policies** (Cilium, namespace isolation)
 4. **Ingress security** (TLS, ModSecurity, rate limiting)

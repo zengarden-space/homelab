@@ -1,3 +1,11 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+helmDefaults:
+  wait: true
+  timeout: 600
 
 repositories:
   - name: gitea

@@ -3,6 +3,10 @@ environments:
     values:
       - env.yaml
 ---
+helmDefaults:
+  wait: true
+  timeout: 600
+
 repositories:
   - name: external-secrets
     url: https://charts.external-secrets.io
@@ -47,6 +51,12 @@ releases:
   - name: secrets-source
     namespace: secrets
     chart: ./secrets-source
+    needs:
+      - secrets-system/external-secrets
+
+  - name: integrations-source
+    namespace: integrations
+    chart: ./integrations-source
     needs:
       - secrets-system/external-secrets
 

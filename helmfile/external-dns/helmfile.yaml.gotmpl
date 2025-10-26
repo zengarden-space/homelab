@@ -1,3 +1,12 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+helmDefaults:
+  wait: true
+  timeout: 600
+
 repositories:
   - name: external-dns
     url: https://kubernetes-sigs.github.io/external-dns/
@@ -45,7 +54,11 @@ releases:
               - name: MIKROTIK_DEFAULT_COMMENT
                 value: Managed by ExternalDNS
               - name: MIKROTIK_BASEURL
-                value: http://mikrotik-proxy.homelab.int.{{ .Values.domain }}
+                value: http://mikrotik-proxy.homelab.int.{{ .Values.domain }}:5555
+              - name: MIKROTIK_USERNAME
+                value: user
+              - name: MIKROTIK_PASSWORD
+                value: password
             livenessProbe:
               httpGet:
                 path: /healthz

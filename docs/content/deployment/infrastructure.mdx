@@ -17,7 +17,7 @@ This guide walks through deploying the bare metal infrastructure, from Raspberry
 - Ansible 2.9+ installed
 - kubectl 1.28+ installed
 - SSH client
-- Network access to VLAN77 (192.168.77.0/24)
+- Network access to Homelab network (192.168.77.0/24)
 
 ## Step 1: Raspberry Pi OS Bootstrap
 
@@ -51,7 +51,7 @@ sudo nano /mnt/etc/cloud/cloud.cfg.d/99-custom.cfg
 ```yaml
 #cloud-config
 hostname: blade001
-fqdn: blade001.homelab.int.zengarden.space
+fqdn: blade001.zengarden.space
 manage_etc_hosts: true
 
 users:
@@ -135,45 +135,67 @@ ssh admin@192.168.88.1
 # Default password: <empty> or <admin>
 ```
 
-### 2.2 Configure VLANs
+### 2.2 Configure Bridges
 
-**Create VLAN interfaces:**
+**Create bridge interfaces for network isolation:**
 ```routeros
-# VLAN77 (K3s Cluster)
-/interface vlan
-add interface=eth2 name=vlan77 vlan-id=77
+# Create bridges (if not already present)
+/interface bridge
+add name=bridge-home comment="Home Network - 192.168.88.0/24"
+add name=bridge-homelab comment="Homelab K3s Cluster - 192.168.77.0/24"
 
-# VLAN88 (Home)
-/interface vlan
-add interface=eth4 name=vlan88 vlan-id=88
+# Add physical interfaces to bridges
+/interface bridge port
+add interface=ether2 bridge=bridge-homelab hw=yes comment="Zyxel switch → blade001-004"
+add interface=ether3 bridge=bridge-homelab hw=yes comment="Direct to blade005"
+add interface=ether4 bridge=bridge-home hw=yes
+add interface=ether5 bridge=bridge-home hw=yes comment="2.5Gbps port"
 
-# VLAN100 (Management)
-/interface vlan
-add interface=eth5 name=vlan100 vlan-id=100
+# WiFi interfaces (if using MikroTik WiFi)
+# /interface bridge port
+# add interface=wlan1 bridge=bridge-home comment="2.4GHz WiFi"
+# add interface=wlan2 bridge=bridge-home comment="5GHz WiFi"
 ```
+
+**Note:** Hardware offload (`hw=yes`) is enabled on all bridge ports for performance.
 
 ### 2.3 Configure IP Addresses
 
 ```routeros
 /ip address
-add address=192.168.77.1/24 interface=vlan77
-add address=192.168.88.1/24 interface=vlan88
-add address=192.168.100.1/24 interface=vlan100
+add address=192.168.77.1/24 interface=bridge-homelab comment="Homelab gateway"
+add address=192.168.88.1/24 interface=bridge-home comment="Home gateway"
 ```
 
-### 2.4 Configure DHCP (optional, we use static IPs)
+### 2.4 Configure DHCP for Homelab
 
 ```routeros
-# DHCP for VLAN77 (optional, for dynamic nodes)
+# DHCP pool for K3s cluster blades
 /ip pool
-add name=pool-vlan77 ranges=192.168.77.50-192.168.77.100
+add name=pool-homelab ranges=192.168.77.170-192.168.77.199
 
+# DHCP server for Homelab network
 /ip dhcp-server
-add address-pool=pool-vlan77 interface=vlan77 name=dhcp-vlan77
+add name=dhcp-homelab interface=bridge-homelab address-pool=pool-homelab lease-time=30m
+
+# DHCP network configuration
+/ip dhcp-server network
+add address=192.168.77.0/24 gateway=192.168.77.1 dns-server=192.168.77.1 domain=homelab.int.zengarden.space
+
+# DHCP server for Home network (if needed)
+/ip dhcp-server
+add name=defconf interface=bridge-home lease-time=30m
 
 /ip dhcp-server network
-add address=192.168.77.0/24 gateway=192.168.77.1 dns-server=192.168.77.1
+add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1 domain=zengarden.space
 ```
+
+**Expected DHCP leases (Homelab):**
+- blade001: 192.168.77.170
+- blade002: 192.168.77.171
+- blade003: 192.168.77.172
+- blade004: 192.168.77.173
+- blade005: 192.168.77.174
 
 ### 2.5 Configure DNS
 
@@ -184,47 +206,70 @@ set allow-remote-requests=yes
 
 # Add static DNS entries for blades
 /ip dns static
-add name=blade001.homelab.int.zengarden.space address=192.168.77.170
-add name=blade002.homelab.int.zengarden.space address=192.168.77.171
-add name=blade003.homelab.int.zengarden.space address=192.168.77.172
-add name=blade004.homelab.int.zengarden.space address=192.168.77.173
-add name=blade005.homelab.int.zengarden.space address=192.168.77.174
+add name=blade001.zengarden.space address=192.168.77.170
+add name=blade002.zengarden.space address=192.168.77.171
+add name=blade003.zengarden.space address=192.168.77.172
+add name=blade004.zengarden.space address=192.168.77.173
+add name=blade005.zengarden.space address=192.168.77.174
 ```
 
-### 2.6 Configure Firewall
+### 2.6 Configure Interface Lists
+
+**Create interface lists for firewall rules:**
+```routeros
+/interface list
+add name=LAN comment="Local networks"
+add name=WAN comment="Internet-facing interfaces"
+
+/interface list member
+add list=LAN interface=bridge-home
+add list=LAN interface=bridge-homelab
+add list=WAN interface=pppoe-out1
+```
+
+### 2.7 Configure Firewall
 
 **Refer to [Security documentation](/introduction/security#layer-1-network-segmentation) for complete firewall rules.**
 
-**Basic rules:**
+**Network isolation firewall rules:**
 ```routeros
-# Allow established/related
 /ip firewall filter
-add action=accept chain=forward connection-state=established,related
+# Fasttrack established/related connections (hardware offload)
+add action=fasttrack-connection chain=forward connection-state=established,related hw-offload=yes comment="Fasttrack established/related"
+add action=accept chain=forward connection-state=established,related,untracked comment="Accept established/related"
+add action=drop chain=forward connection-state=invalid comment="Drop invalid"
 
-# Allow VLAN100 (management) to all
-add action=accept chain=forward src-address=192.168.100.0/24
+# Drop WAN → LAN if not DSTNATed
+add action=drop chain=forward connection-state=new connection-nat-state=!dstnat in-interface-list=WAN comment="Drop WAN → LAN not DSTNATed"
 
-# Allow VLAN88 (home) to VLAN77 ports 80,443
-add action=accept chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=80,443
+# Network segmentation rules
+add action=accept chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=22,80,443 comment="Allow Home → Homelab (SSH,HTTP,HTTPS)"
+add action=drop chain=forward dst-address=192.168.77.0/24 src-address=192.168.88.0/24 comment="Block Home → Homelab (other)"
+add action=drop chain=forward src-address=192.168.77.0/24 dst-address=192.168.88.0/24 comment="Block Homelab → Home"
 
-# Block VLAN88 to VLAN77 (other ports)
-add action=drop chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24
-
-# Block all to VLAN100 (management isolation)
-add action=drop chain=forward dst-address=192.168.100.0/24
-
-# Allow VLAN77 to internet
-add action=accept chain=forward src-address=192.168.77.0/24 out-interface=eth1
+# Allow LAN → Internet
+add action=accept chain=forward src-address=192.168.77.0/24 out-interface-list=WAN comment="Allow Homelab → Internet"
+add action=accept chain=forward src-address=192.168.88.0/24 out-interface-list=WAN comment="Allow Home → Internet"
 
 # Default drop
-add action=drop chain=forward
+add action=drop chain=forward comment="Drop all remaining"
 ```
 
-### 2.7 Configure NAT
+**Input chain protection:**
+```routeros
+/ip firewall filter
+add action=accept chain=input connection-state=established,related,untracked comment="Accept established"
+add action=drop chain=input connection-state=invalid comment="Drop invalid"
+add action=accept chain=input protocol=icmp comment="Accept ICMP"
+add action=accept chain=input in-interface-list=LAN comment="Accept from LAN"
+add action=drop chain=input comment="Drop all else"
+```
+
+### 2.8 Configure NAT
 
 ```routeros
 /ip firewall nat
-add action=masquerade chain=srcnat out-interface=eth1
+add action=masquerade chain=srcnat out-interface-list=WAN comment="Masquerade to Internet"
 ```
 
 ## Step 3: Google OAuth Credentials

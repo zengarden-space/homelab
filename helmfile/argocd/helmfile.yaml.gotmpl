@@ -1,11 +1,33 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+helmDefaults:
+  wait: true
+  timeout: 600
+
 repositories:
   - name: argo
     url: https://argoproj.github.io/argo-helm
 
 releases:
+  - name: argocd-config
+    namespace: argocd
+    chart: ./charts/argocd-config
+    values:
+      - domain: {{ .Values.domain }}
+        applicationSet:
+          git:
+            repoURL: https://gitea.homelab.int.{{ .Values.domain }}/zengarden-space/manifests.git
+            revision: main
+            manifestsPath: manifests/*
+
   - name: argocd
     namespace: argocd
     chart: argo/argo-cd
+    needs:
+      - argocd/argocd-config
     values:
       - createAggregateRoles: true
 
@@ -62,15 +84,3 @@ releases:
             policy.csv: |
               g, oleksiy.pylypenko@gmail.com, role:admin
 
-  - name: argocd-config
-    namespace: argocd
-    chart: ./charts/argocd-config
-    needs:
-      - argocd/argocd
-    values:
-      - domain: {{ .Values.domain }}
-        applicationSet:
-          git:
-            repoURL: https://gitea.homelab.int.{{ .Values.domain }}/zengarden-space/manifests.git
-            revision: main
-            manifestsPath: manifests/*
