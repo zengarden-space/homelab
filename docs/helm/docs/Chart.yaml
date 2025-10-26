@@ -1,0 +1,13 @@
+apiVersion: v2
+name: docs
+description: A Helm chart for homelab platform engineering documentation
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - documentation
+  - nextjs
+  - nextra
+home: https://github.com/zengarden-space/homelab
+sources:
+  - https://github.com/zengarden-space/homelab

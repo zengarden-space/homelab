@@ -1,0 +1,11 @@
+ingress:
+  enabled: true
+  className: "external"
+  hosts:
+    - host: homelab.zengarden.space
+      paths:
+        - path: /
+          pathType: Prefix
+
+env:
+  NODE_ENV: production

@@ -1,0 +1,159 @@
+name: Docs CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'ci-cd.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: gitea.homelab.int.zengarden.space
+  IMAGE_NAME: zengarden-space/homelab/docs
+
+jobs:
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.server_url == 'https://gitea.homelab.int.zengarden.space'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.12.0'
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          token: ${{ secrets.EXTERNAL_GITHUB_COM_TOKEN }}
+          version: v0.67.2
+          cache: true
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.PACKAGE_WRITE_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docs
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Add IMAGE_TAG Environment Variable
+        shell: bash
+        run: |
+          echo "${{ steps.meta.outputs.tags }}"
+          echo IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | tail -n 1 | cut -d':' -f2) >> $GITHUB_ENV
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          skip-setup-trivy: true
+        env:
+          TRIVY_PLATFORM: linux/arm64
+
+      - name: Lint Helm chart
+        run: helm lint ./docs/helm/docs
+
+      - name: Update Helm values
+        run: |
+          echo "Using tag: $IMAGE_TAG"
+          helm template docs ./docs/helm/docs \
+            --namespace docs \
+            --values ./docs/helm/values-prod.yaml \
+            --set image.tag=$IMAGE_TAG > manifest.yaml
+
+      - name: Checkout manifests repo
+        uses: actions/checkout@v4
+        with:
+          repository: zengarden-space/manifests
+          ref: main
+          path: manifests
+          token: ${{ secrets.CONTENT_WRITE_TOKEN }}
+
+      - name: Push changes to manifests
+        run: |
+          cd manifests
+          git config --local user.name "Gitea Actions Bot"
+          git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+          # Retry loop for git operations
+          for attempt in {1..5}; do
+            echo "Attempt $attempt of 5"
+
+            # Pull latest changes
+            if ! git pull origin main; then
+              echo "Failed to pull on attempt $attempt"
+              continue
+            fi
+
+            # Copy manifest and add files
+            mkdir -p ./manifests/homelab-docs
+            cp ../manifest.yaml ./manifests/homelab-docs/manifest.yaml
+            git add .
+
+            # Check if there are changes to commit
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              break
+            fi
+
+            # Commit changes
+            if ! git commit -m "homelab-docs: ${{ github.event.head_commit.message }} ${{github.sha}}"; then
+              echo "Failed to commit on attempt $attempt"
+              git reset --hard HEAD
+              continue
+            fi
+
+            # Try to push
+            if git push origin main; then
+              echo "Successfully pushed on attempt $attempt"
+              break
+            else
+              echo "Failed to push on attempt $attempt, discarding commit"
+              git reset --hard HEAD~1
+
+              if [ $attempt -eq 5 ]; then
+                echo "Failed to push after 5 attempts"
+                exit 1
+              fi
+
+              sleep $((attempt * 2))  # Exponential backoff
+            fi
+          done
