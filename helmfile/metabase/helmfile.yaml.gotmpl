@@ -4,14 +4,14 @@ repositories:
     url: https://pmint93.github.io/helm-charts
 
 releases:
-  - name: metabase-derived-secrets
+  - name: metabase-config
     namespace: metabase
-    chart: ./charts/metabase-derived-secrets
+    chart: ./charts/metabase-config
 
   - name: metabase
     namespace: metabase
     needs:
-      - metabase-derived-secrets
+      - metabase-config
     chart: pmint93/metabase
     version: 2.22.2
     values:
@@ -29,14 +29,14 @@ releases:
           enabled: true
           className: internal
           hosts:
-            - metabase.homelab.int.zengarden.space
+            - metabase.homelab.int.{{ .Values.domain }}
           path: /
           pathType: Prefix
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
           tls:
             - hosts:
-                - metabase.homelab.int.zengarden.space
+                - metabase.homelab.int.{{ .Values.domain }}
               secretName: metabase-tls
 
         extraEnv:
@@ -76,6 +76,6 @@ releases:
     values:
       - metabase:
           url: http://metabase.metabase.svc.cluster.local
-          adminEmail: admin@example.com
+          adminEmail: admin@{{ .Values.domain }}
           adminPasswordSecret: metabase-admin
           adminPasswordSecretKey: adminPassword

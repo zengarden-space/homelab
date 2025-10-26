@@ -1,5 +1,5 @@
 #!/bin/bash
-# filepath: /home/oleksiyp/dev/basic-infra/ansible/updates/install.sh
+# filepath: ansible/apt-update/apt-update.sh
 
 set -euo pipefail
 

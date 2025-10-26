@@ -1,0 +1,570 @@
+# Core Platform Deployment
+
+## Deploy Platform Services with Helmfile
+
+This guide walks through deploying core Kubernetes platform services using Helmfile.
+
+## Prerequisites
+
+- K3s cluster running (from [Infrastructure Deployment](/deployment/infrastructure))
+- kubectl configured with cluster access
+- helm and helmfile installed on management workstation
+- Cloudflare account with API token
+- GitHub personal access token
+- Domain name registered
+
+## Overview
+
+The core platform includes:
+
+1. **metallb-system** - Load balancer IP pool
+2. **secrets-system** - External Secrets + DerivedSecrets operator
+3. **cert-manager** - TLS certificate management
+4. **external-dns** - Automatic DNS synchronization
+5. **ingress-nginx** - HTTP(S) ingress controller
+6. **external-tunnel** - Cloudflare Tunnel + external ingress
+7. **victoria-metrics** - Monitoring stack
+8. **argocd** - GitOps controller
+9. **gitea** - Git server + automation
+10. **cnpg-system** - PostgreSQL operator
+11. **metabase** - Analytics platform
+
+## Step 1: Configure External Integrations
+
+### 1.1 Create integrations.yaml
+
+**Navigate to helmfile directory:**
+```bash
+cd helmfile
+cp ../integrations.yaml.template integrations.yaml
+nano integrations.yaml
+```
+
+**integrations.yaml structure:**
+```yaml
+# Cloudflare Credentials
+cert-manager:
+  cloudflareEmail: "admin@zengarden.space"
+  cloudflareApiToken: "<cloudflare-api-token>"
+
+external-tunnel:
+  accountId: "<cloudflare-account-id>"
+  tunnelId: "<cloudflare-tunnel-id>"
+  tunnelSecret: "<cloudflare-tunnel-secret>"
+
+# GitHub Credentials
+gitea:
+  githubToken: "<github-personal-access-token>"
+  googleClientId: "<google-client-id>.apps.googleusercontent.com"
+  googleClientSecret: "<google-client-secret>"
+
+# ArgoCD Credentials
+argocd:
+  googleClientId: "<google-client-id>.apps.googleusercontent.com"
+  googleClientSecret: "<google-client-secret>"
+  adminEmail: "your-email@gmail.com"
+```
+
+### 1.2 Obtain Cloudflare API Token
+
+1. Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. Navigate to **My Profile > API Tokens**
+3. Click **Create Token**
+4. Template: **Edit zone DNS**
+5. Zone Resources: **Include > Specific zone > zengarden.space**
+6. Click **Continue to summary** > **Create Token**
+7. Copy token to `integrations.yaml`
+
+### 1.3 Create Cloudflare Tunnel
+
+```bash
+# Install cloudflared CLI
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+sudo dpkg -i cloudflared-linux-arm64.deb
+
+# Authenticate with Cloudflare
+cloudflared tunnel login
+
+# Create tunnel
+cloudflared tunnel create homelab
+
+# Note the Tunnel ID from output
+# Copy credentials.json content to integrations.yaml (tunnelSecret)
+cat ~/.cloudflared/<tunnel-id>.json
+```
+
+### 1.4 Obtain GitHub Personal Access Token
+
+1. Navigate to [GitHub Settings > Developer Settings > Personal Access Tokens](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Scopes:
+   - `repo` (all)
+   - `read:org`
+   - `write:packages`
+4. Click **Generate token**
+5. Copy token to `integrations.yaml`
+
+## Step 2: Deploy Core Services
+
+### 2.1 Create Kubernetes Secret for Integrations
+
+**Apply integrations.yaml as Kubernetes secret:**
+```bash
+# Create integrations namespace
+kubectl create namespace integrations
+
+# Create secret from integrations.yaml
+kubectl -n integrations create secret generic integrations \
+  --from-file=integrations.yaml
+
+# Verify secret
+kubectl -n integrations get secrets
+```
+
+### 2.2 Configure Component Environment Files
+
+**Each component has an `env.yaml.template` - copy and customize:**
+
+```bash
+# MetalLB (IP pool configuration)
+cd metallb-system
+cp env.yaml.template env.yaml
+nano env.yaml
+```
+
+**metallb-system/env.yaml:**
+```yaml
+ipRanges:
+  - 192.168.77.200-192.168.77.254
+```
+
+```bash
+# Secrets System (master password for DerivedSecrets)
+cd ../secrets-system
+cp env.yaml.template env.yaml
+nano env.yaml
+```
+
+**secrets-system/env.yaml:**
+```yaml
+masterPassword: "<generate-strong-password>"
+# Use: openssl rand -base64 32
+```
+
+```bash
+# Victoria Metrics (Gotify notification settings)
+cd ../victoria-metrics
+cp env.yaml.template env.yaml
+nano env.yaml
+```
+
+**victoria-metrics/env.yaml:**
+```yaml
+gotify:
+  adminPassword: "<generate-password>"
+  token: "<will-be-generated-after-deployment>"
+```
+
+**Repeat for all components with `.env.yaml.template` files.**
+
+### 2.3 Deploy Helmfile
+
+**Deploy all components in order:**
+```bash
+cd ..  # Back to helmfile/ directory
+
+# Dry run (see what will be deployed)
+helmfile diff
+
+# Deploy all releases
+helmfile apply
+
+# Or deploy specific component
+helmfile -f metallb-system/helmfile.yaml.gotmpl apply
+helmfile -f secrets-system/helmfile.yaml.gotmpl apply
+# ... and so on
+```
+
+**Deployment order (automatic via `needs` dependencies):**
+1. metallb-system
+2. secrets-system (DerivedSecrets + External Secrets)
+3. cert-manager (TLS certificates)
+4. external-dns (DNS synchronization)
+5. ingress-nginx-internal
+6. external-tunnel (Cloudflare + ingress-nginx-external)
+7. victoria-metrics
+8. argocd
+9. gitea
+10. cnpg-system
+11. metabase
+
+**Duration:** ~30-60 minutes (depends on image pulls and readiness checks)
+
+### 2.4 Monitor Deployment Progress
+
+**Watch all pods:**
+```bash
+watch kubectl get pods --all-namespaces
+```
+
+**Check specific namespace:**
+```bash
+kubectl -n argocd get pods -w
+kubectl -n gitea get pods -w
+kubectl -n victoria-metrics get pods -w
+```
+
+**Check Helmfile releases:**
+```bash
+helm list --all-namespaces
+```
+
+## Step 3: Verify Core Platform
+
+### 3.1 Verify MetalLB
+
+**Check IP pool:**
+```bash
+kubectl -n metallb-system get ipaddresspools
+
+# Expected output:
+# NAME      AUTO ASSIGN   AVOID BUGGY IPS   ADDRESSES
+# default   true          false             ["192.168.77.200-192.168.77.254"]
+```
+
+**Check LoadBalancer IPs assigned:**
+```bash
+kubectl get svc --all-namespaces -o wide | grep LoadBalancer
+
+# Expected: ingress-nginx services have EXTERNAL-IP assigned
+```
+
+### 3.2 Verify cert-manager
+
+**Check ClusterIssuers:**
+```bash
+kubectl get clusterissuers
+
+# Expected:
+# NAME                READY   AGE
+# letsencrypt-prod    True    10m
+# internal-ca         True    10m
+```
+
+**Check certificate issuance (after ingress created):**
+```bash
+kubectl get certificates --all-namespaces
+
+# Certificates should be in Ready=True state
+```
+
+### 3.3 Verify Ingress
+
+**Check internal ingress:**
+```bash
+kubectl -n ingress-nginx get svc ingress-nginx-internal-controller
+
+# Expected:
+# NAME                               TYPE           CLUSTER-IP      EXTERNAL-IP       PORT(S)
+# ingress-nginx-internal-controller  LoadBalancer   10.43.xxx.xxx   192.168.77.200    80:xxx/TCP,443:xxx/TCP
+```
+
+**Test ingress (should return 404, but shows it's working):**
+```bash
+curl -k https://192.168.77.200
+# Expected: 404 page not found (nginx default)
+```
+
+### 3.4 Verify ArgoCD
+
+**Get initial admin password:**
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+echo
+```
+
+**Access ArgoCD UI:**
+```
+URL: https://argocd.homelab.int.zengarden.space
+Username: admin
+Password: <from above>
+```
+
+**Login via CLI:**
+```bash
+argocd login argocd.homelab.int.zengarden.space --username admin
+
+# List applications (should be empty initially)
+argocd app list
+```
+
+### 3.5 Verify Gitea
+
+**Access Gitea UI:**
+```
+URL: https://gitea.homelab.int.zengarden.space
+```
+
+**Get admin credentials:**
+```bash
+# Admin password is derived from DerivedSecret
+kubectl -n gitea get secret gitea-admin -o jsonpath="{.data.password}" | base64 -d
+echo
+
+# Username: admin
+# Password: <from above>
+```
+
+**Check OAuth setup job:**
+```bash
+kubectl -n gitea get jobs
+
+# gitea-oauth-setup should be Completed
+```
+
+**Check sync job:**
+```bash
+kubectl -n gitea logs job/gitea-sync -f
+
+# Should show repository synchronization from GitHub
+```
+
+### 3.6 Verify External DNS
+
+**Check external-dns logs:**
+```bash
+kubectl -n external-dns logs -l app.kubernetes.io/name=external-dns --tail=50
+
+# Should show DNS record creation events
+```
+
+**Verify MikroTik DNS records:**
+```bash
+# SSH to MikroTik
+ssh admin@192.168.77.1
+
+# Check DNS static entries
+/ip dns static print
+
+# Should see entries for:
+# - gitea.homelab.int.zengarden.space
+# - argocd.homelab.int.zengarden.space
+# - grafana.homelab.int.zengarden.space
+# - etc.
+```
+
+### 3.7 Verify Victoria Metrics
+
+**Access Grafana:**
+```
+URL: https://grafana.homelab.int.zengarden.space
+Username: admin
+Password: <from victoria-metrics/env.yaml or generated>
+```
+
+**Check Prometheus data source:**
+- Navigate to **Configuration > Data Sources**
+- Should see VictoriaMetrics configured
+
+**Check dashboards:**
+- Navigate to **Dashboards**
+- Import Kubernetes dashboards (if not auto-imported)
+
+### 3.8 Verify Metabase
+
+**Access Metabase:**
+```
+URL: https://metabase.homelab.int.zengarden.space
+```
+
+**Initial setup:**
+- Create admin account
+- Skip adding database (CNPG operator will do this automatically)
+
+**Check CNPG operator logs:**
+```bash
+kubectl -n metabase logs -l app=metabase-cnpg-operator --tail=50
+
+# Should show database auto-discovery events (after CNPG databases are created)
+```
+
+## Step 4: Configure DNS
+
+### 4.1 Internal DNS (homelab.int.zengarden.space)
+
+**Already configured automatically by external-dns!**
+
+**Verify from home network (VLAN88):**
+```bash
+nslookup gitea.homelab.int.zengarden.space
+# Should resolve to MetalLB IP (192.168.77.200-254 range)
+```
+
+### 4.2 External DNS (homelab.zengarden.space via Cloudflare Tunnel)
+
+**Configure Cloudflare Tunnel DNS:**
+
+1. Navigate to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
+2. **Access > Tunnels > homelab**
+3. **Public Hostname** tab
+4. Add hostnames:
+   - `*.homelab.zengarden.space` → `https://ingress-nginx-external-controller.external-tunnel.svc:443`
+   - (Specific services as needed)
+
+**Or use Cloudflare DNS API:**
+```bash
+# Add CNAME for Tunnel
+# This is done via Cloudflare Tunnel configuration, not external-dns
+```
+
+## Step 5: Post-Deployment Configuration
+
+### 5.1 Configure Gitea Organization Secrets
+
+**Gitea Actions needs secrets for CI/CD pipelines:**
+
+1. Navigate to Gitea UI
+2. Organization: **zengarden-space**
+3. **Settings > Secrets > Actions**
+4. Add secrets:
+   - `GITEA_TOKEN`: Personal access token (for updating manifests)
+   - `DOCKER_USERNAME`: Gitea username
+   - `DOCKER_PASSWORD`: Gitea password or token
+
+### 5.2 Configure ArgoCD Repository
+
+**Add manifests repository to ArgoCD:**
+
+```bash
+# ArgoCD automation chart should auto-configure this, but verify:
+argocd repo list
+
+# Should show:
+# https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+```
+
+**If not configured, add manually:**
+```bash
+argocd repo add https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git \
+  --username admin \
+  --password <gitea-admin-password>
+```
+
+### 5.3 Verify ArgoCD ApplicationSet
+
+**Check ApplicationSet:**
+```bash
+kubectl -n argocd get applicationsets
+
+# Expected:
+# NAME           AGE
+# applications   10m
+```
+
+**ApplicationSet should auto-discover apps from manifests/ repo directories**
+
+## Troubleshooting
+
+### Helm Release Fails
+
+**Check Helm release status:**
+```bash
+helm list --all-namespaces --failed
+
+# Get release details
+helm status <release-name> -n <namespace>
+
+# Check logs
+kubectl -n <namespace> logs -l app=<app-name> --tail=100
+```
+
+### Ingress Not Accessible
+
+**Check ingress resource:**
+```bash
+kubectl -n <namespace> get ingress
+kubectl -n <namespace> describe ingress <ingress-name>
+
+# Verify:
+# - Hosts configured correctly
+# - TLS certificate issued (cert-manager)
+# - Backend service exists
+```
+
+**Check certificate issuance:**
+```bash
+kubectl -n <namespace> get certificate
+kubectl -n <namespace> describe certificate <cert-name>
+
+# If not ready, check cert-manager logs
+kubectl -n cert-manager logs -l app=cert-manager --tail=50
+```
+
+### Gitea OAuth Setup Fails
+
+**Check OAuth setup job:**
+```bash
+kubectl -n gitea logs job/gitea-oauth-setup --tail=100
+
+# Common issues:
+# - Gitea not ready yet (job retries automatically)
+# - Wrong Google OAuth credentials
+# - Network connectivity
+```
+
+**Manually configure OAuth (if job fails):**
+1. Navigate to Gitea UI
+2. Admin panel > Authentication Sources
+3. Add OAuth2 source:
+   - Provider: Google
+   - Client ID/Secret: From integrations.yaml
+   - Redirect URI: `https://gitea.homelab.int.zengarden.space/user/oauth2/google/callback`
+
+### External DNS Not Creating Records
+
+**Check external-dns logs:**
+```bash
+kubectl -n external-dns logs -l app.kubernetes.io/name=external-dns --tail=100
+
+# Common issues:
+# - Restrictive proxy not running
+# - Wrong MikroTik credentials
+# - MikroTik REST API disabled
+```
+
+**Check restrictive proxy:**
+```bash
+ssh ubuntu@192.168.77.170
+sudo systemctl status restrictive-proxy
+
+# Check logs
+sudo journalctl -u restrictive-proxy -f
+```
+
+### DerivedSecrets Not Created
+
+**Check DerivedSecret CRD:**
+```bash
+kubectl get derivedsecrets --all-namespaces
+
+# Check operator logs
+kubectl -n derived-secret-operator logs -l app=derived-secret-operator --tail=50
+```
+
+**Verify master password:**
+```bash
+kubectl -n derived-secret-operator get secret master-password
+
+# Ensure secrets-system/env.yaml masterPassword was set correctly
+```
+
+## Next Steps
+
+Core platform deployed! Continue to:
+
+1. [Applications Deployment](/deployment/applications) - Deploy applications via GitOps
+2. [Operations](/operations) - Learn about ongoing maintenance
+
+---
+
+*Core platform deployment complete. Your Kubernetes cluster now has all platform services running!*

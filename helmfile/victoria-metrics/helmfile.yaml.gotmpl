@@ -22,13 +22,13 @@ releases:
             enabled: true
             ingressClassName: internal
             hosts:
-              - grafana.homelab.int.zengarden.space
+              - grafana.homelab.int.{{ .Values.domain }}
             annotations:
               cert-manager.io/cluster-issuer: "letsencrypt-prod"
             tls:
               - secretName: grafana-tls
                 hosts:
-                  - grafana.homelab.int.zengarden.space
+                  - grafana.homelab.int.{{ .Values.domain }}
           
           # Enable unified alerting (Grafana 8+)
           grafana.ini:
@@ -39,7 +39,7 @@ releases:
             
             # Configure external URL for proper links in alerts
             server:
-              root_url: https://grafana.homelab.int.zengarden.space
+              root_url: https://grafana.homelab.int.{{ .Values.domain }}
               serve_from_sub_path: false
         
         # k3s specifics
@@ -57,18 +57,18 @@ releases:
         alertmanager:
           enabled: true
           spec:
-            externalURL: "https://alerts.homelab.int.zengarden.space"
+            externalURL: "https://alerts.homelab.int.{{ .Values.domain }}"
           ingress:
             enabled: true
             ingressClassName: internal
             hosts:
-              - alerts.homelab.int.zengarden.space
+              - alerts.homelab.int.{{ .Values.domain }}
             annotations:
               cert-manager.io/cluster-issuer: "letsencrypt-prod"
             tls:
               - secretName: alerts-tls
                 hosts:
-                  - alerts.homelab.int.zengarden.space
+                  - alerts.homelab.int.{{ .Values.domain }}
           config:
             route:
               receiver: gotify-notifications
@@ -103,13 +103,13 @@ releases:
           enabled: true
           className: "external"
           hosts:
-            - host: notifications.homelab.int.zengarden.space
+            - host: notifications.homelab.int.{{ .Values.domain }}
               paths:
               - path: /
                 pathType: ImplementationSpecific
           tls:
           - hosts:
-            - notifications.homelab.int.zengarden.space
+            - notifications.homelab.int.{{ .Values.domain }}
             secretName: notifications-tls
         persistence:
           enabled: true

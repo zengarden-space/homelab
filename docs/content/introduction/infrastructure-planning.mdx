@@ -1,0 +1,467 @@
+# Infrastructure Planning
+
+## Hardware & Software Overview
+
+This section provides comprehensive infrastructure planning details, including hardware specifications, cost analysis, power consumption metrics, and software stack decisions.
+
+## Hardware Infrastructure
+
+### Compute Nodes
+
+**Selected Platform:** Raspberry Pi Compute Module 5 (CM5) Blades
+
+| Specification | Details | Reasoning |
+|--------------|---------|-----------|
+| **CPU** | ARM Cortex-A76 (4 cores) | Balance of performance and power efficiency |
+| **RAM** | 16GB LPDDR4X (blade001-004), 8GB (blade005) | Ample for K8s control plane + workloads |
+| **Architecture** | ARM64 (aarch64) | Low power consumption, modern instruction set |
+| **Form Factor** | Compute Blade | Space-efficient, centralized cooling |
+| **Quantity** | 5 nodes | 3 masters (HA) + 2 workers |
+| **Power per Node** | ~5-8W under load | Critical for 24/7 operation cost |
+
+**Node Roles:**
+- **blade001-003**: K3s masters + etcd + worker capabilities (16GB RAM each)
+- **blade004**: Worker (16GB RAM)
+- **blade005**: Worker (8GB RAM)
+
+**Total Compute Resources:**
+- **CPU**: 20 cores (5 nodes × 4 cores)
+- **RAM**: 72GB (4 nodes × 16GB + 1 node × 8GB)
+- **Power**: 28-40W total cluster
+
+### Storage Infrastructure
+
+#### Initial Approach (Abandoned)
+**Original Selection:** Samsung 990 PRO NVMe SSDs
+- **Capacity**: 512GB per drive
+- **Performance**: 7,000 MB/s read, 5,000 MB/s write
+- **Problem**: Excessive heat generation in enclosed blade chassis
+- **Outcome**: Thermal throttling, reliability concerns
+
+#### Final Selection
+**Adopted Solution:** SK hynix BC711 NVMe SSDs
+- **Capacity**: 256GB per drive
+- **Performance**: 2,000-3,000 MB/s (sufficient for homelab)
+- **Form Factor**: M.2 2242 (compact size)
+- **Temperature**: Minimal heat generation
+- **Cost**: ~$20-30 per drive
+- **Quantity**: 5 drives (1 per node)
+
+**Storage Configuration:**
+```
+/dev/nvme0n1 (256GB) → mounted at /var/lib/rancher/k3s
+```
+- **No partitioning**: Single filesystem for simplicity
+- **K3s data**: etcd, containerd, kubelet all on NVMe
+- **Local-path storage**: K3s built-in local-path provisioner
+
+**Storage Architecture:**
+- **Provisioner**: rancher.io/local-path (K3s built-in)
+- **Total Raw**: ~1.2TB (5 × 256GB)
+- **Usable**: ~1.2TB (no replication, node-local storage)
+- **Performance**: Direct NVMe access, low latency
+- **Note**: PVCs are node-local, no cross-node redundancy
+
+### Networking Infrastructure
+
+#### MikroTik Router
+**Model:** MikroTik hEX S (RB760iGS)
+
+| Feature | Specification | Usage |
+|---------|---------------|-------|
+| **Ports** | 5× Gigabit Ethernet + 1× SFP | WAN, VLANs, management |
+| **CPU** | Dual-core 880 MHz MIPS | Routing, firewall, DNS |
+| **RAM** | 256MB | RouterOS + tables |
+| **PoE** | PoE-out on port 5 | Powering devices |
+| **Power** | ~5W | Minimal overhead |
+
+**Port Assignment:**
+- **eth1**: Optical WAN (fiber internet, failover to LTE)
+- **eth2**: VLAN77 trunk (to Zyxel switch → blades 001-004)
+- **eth3**: VLAN77 access (direct to blade005)
+- **eth4**: VLAN88 (home network)
+- **eth5**: VLAN100 (management workstation, 1Gbps)
+
+**Features Used:**
+- VLAN tagging (802.1Q)
+- Stateful firewall
+- DHCP server (per VLAN)
+- DNS server (internal zone)
+- WireGuard VPN server
+- NAT (masquerade)
+- LTE failover (built-in modem for internet redundancy)
+
+#### Zyxel PoE Switch
+**Model:** 8-port Gigabit PoE+ switch
+
+| Feature | Specification |
+|---------|---------------|
+| **Ports** | 8× Gigabit PoE+ |
+| **PoE Budget** | 60W total |
+| **Usage** | Powers CM5 blades |
+| **Power** | ~3W (idle) + PoE consumption |
+
+**Connected Devices:**
+- blade001: PoE powered
+- blade002: PoE powered
+- blade003: PoE powered
+- blade004: PoE powered
+- Uplink: MikroTik eth2
+
+**Note:** blade005 connected directly to MikroTik eth3 (separate VLAN access port)
+
+### Network Topology
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Internet (Fiber Optic)                     │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────────────┐
+│              MikroTik hEX S (Router)                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Firewall │ VLAN Routing │ DNS │ DHCP │ WireGuard    │   │
+│  └──────────────────────────────────────────────────────┘   │
+├────────────┬──────────────┬──────────────┬──────────────────┤
+│ VLAN77     │  VLAN88      │  VLAN100     │  WireGuard VPN   │
+│ (Cluster)  │  (Home)      │  (Mgmt)      │  (Remote)        │
+│ .77.0/24   │  .88.0/24    │  .100.0/24   │  10.8.0.0/24     │
+└─────┬──────┴──────────────┴──────────────┴──────────────────┘
+      │
+      ├─── Zyxel PoE Switch ───┬─── blade001 (.77.11)
+      │                        ├─── blade002 (.77.12)
+      │                        ├─── blade003 (.77.13)
+      │                        └─── blade004 (.77.14)
+      │
+      └─── Direct Connection ─── blade005 (.77.15)
+```
+
+### VLAN Design
+
+| VLAN | Network | Gateway | DNS | Purpose | Firewall Policy |
+|------|---------|---------|-----|---------|----------------|
+| **77** | 192.168.77.0/24 | .77.1 | .77.1 | K3s cluster nodes | Allow internet, block VLAN88→77 except 80/443, block VLAN100 |
+| **88** | 192.168.88.0/24 | .88.1 | .88.1 | Home devices | Allow internet, allow 77:80/443 (web services) |
+| **100** | 192.168.100.0/24 | .100.1 | .100.1 | Admin workstation | Full access (all VLANs + internet), no inbound |
+| **WG** | 10.8.0.0/24 | .77.15 | .77.1 | VPN clients | Access VLAN77 + pod/service networks, block VLAN88/100 |
+
+### Power Budget
+
+| Component | Power (W) | Quantity | Total (W) | Notes |
+|-----------|-----------|----------|-----------|-------|
+| **CM5 Blades** | 5-8W | 5 | 25-40W | Varies with load |
+| **MikroTik Router** | ~5W | 1 | 5W | Constant |
+| **Zyxel Switch** | ~3W + PoE | 1 | 28W | 3W base + ~25W PoE to blades |
+| **Total** | | | **58-73W** | Measured: 60-65W typical |
+
+**Annual Energy Consumption:**
+- Average: 62W × 24h × 365 days = **543 kWh/year**
+- Cost: 543 kWh × $0.14/kWh = **~$76/year** (~$6/month)
+
+**Comparison:**
+- Single desktop PC: ~150-250W (3-4× higher)
+- Cloud equivalent: $200-400/month (40-80× higher cost)
+
+## Software Infrastructure
+
+### Operating System
+
+**Selection:** Ubuntu Server 24.04 LTS (ARM64)
+
+**Reasoning:**
+- Long-term support (5 years)
+- Excellent ARM64 support
+- Ansible compatibility
+- Systemd for service management
+- Well-documented
+
+**Configuration:**
+- Minimal installation (no GUI)
+- Predictable network interface names (eth0)
+- SSH enabled for remote management
+- Automatic security updates disabled (manual control)
+
+### Kubernetes Distribution
+
+**Selection:** K3s v1.32.4+k3s1
+
+| Alternative | Reason NOT Chosen |
+|-------------|-------------------|
+| **kubeadm (vanilla K8s)** | Higher resource overhead, complex setup |
+| **MicroK8s** | Snap-based (additional overhead), less flexibility |
+| **k0s** | Less mature, smaller community |
+| **RKE2** | More resource intensive than K3s |
+
+**K3s Advantages:**
+- **Lightweight**: Single binary, minimal dependencies
+- **ARM64 optimized**: First-class ARM support
+- **Embedded etcd**: No external etcd cluster needed
+- **Batteries included**: Traefik, ServiceLB, local-path (removed in favor of custom)
+- **Production-ready**: CNCF certified Kubernetes
+
+**K3s Configuration:**
+```yaml
+cluster-init: true                    # Bootstrap etcd cluster
+disable:
+  - traefik                           # Use ingress-nginx instead
+  - servicelb                         # Use MetalLB instead
+flannel-backend: none                 # Use Cilium CNI
+disable-network-policy: true          # Cilium handles this
+secrets-encryption: true              # Encrypt secrets at rest
+kube-apiserver-arg:
+  - "enable-admission-plugins=NodeRestriction,PodSecurity"
+  - "audit-log-path=/var/log/kubernetes/audit.log"
+  - "audit-log-maxage=30"
+  - "audit-log-maxbackup=10"
+  - "audit-log-maxsize=100"
+  - "oidc-issuer-url=https://accounts.google.com"
+  - "oidc-client-id=<google-client-id>"
+  - "oidc-username-claim=email"
+```
+
+**Note:** K3s includes local-path provisioner by default, providing node-local persistent storage.
+
+### Container Network Interface (CNI)
+
+**Selection:** Cilium 1.17.4
+
+| Feature | Benefit |
+|---------|---------|
+| **eBPF-based** | Bypasses iptables overhead, better performance |
+| **NetworkPolicy** | Native support for Kubernetes NetworkPolicy |
+| **Hubble** | Observability for network flows |
+| **Encryption** | Optional WireGuard-based pod-to-pod encryption |
+| **kube-proxy replacement** | eBPF-based service load balancing |
+
+**Alternatives Considered:**
+- **Flannel**: Simple but limited features
+- **Calico**: More resource intensive, iptables-based
+- **Weave**: Deprecated
+
+### Storage
+
+**Selection:** K3s local-path (built-in)
+
+**Architecture:**
+- **Provisioner**: rancher.io/local-path (K3s default)
+- **Storage Location**: `/var/lib/rancher/k3s/storage` on each node's NVMe
+- **Binding**: WaitForFirstConsumer (binds to node where pod is scheduled)
+- **Reclaim Policy**: Delete (PV deleted when PVC deleted)
+
+**Characteristics:**
+- **Node-local**: PVCs are bound to the node where first pod is scheduled
+- **No replication**: Data exists only on one node (no cross-node redundancy)
+- **Performance**: Direct NVMe access, very low latency
+- **Simplicity**: No additional operators or complexity
+- **Limitation**: Pods requiring PVC cannot move between nodes
+
+**Why local-path for Homelab:**
+- **Sufficient for stateless apps**: Most apps are stateless or use external databases
+- **Simpler operations**: No distributed storage complexity
+- **Better performance**: Direct NVMe access without network overhead
+- **Lower resource usage**: No Ceph daemons consuming CPU/RAM
+- **Acceptable risk**: Critical data backed up externally (Git, cloud)
+
+### Core Platform Services
+
+| Service | Purpose | Version |
+|---------|---------|---------|
+| **MetalLB** | Load balancer for bare metal | v0.14.5 |
+| **ingress-nginx** | HTTP(S) ingress controller | Latest |
+| **cert-manager** | TLS certificate automation | v1.18.1 |
+| **external-dns** | DNS synchronization | v1.15.0 |
+| **External Secrets Operator** | External secret integration | v0.10.4 |
+| **ArgoCD** | GitOps continuous deployment | Latest |
+| **Gitea** | Self-hosted Git server | v12.4.0 |
+| **CloudNativePG** | PostgreSQL operator | Latest |
+| **Victoria Metrics** | Metrics and monitoring | Latest |
+| **Metabase** | Data analytics and visualization | Latest |
+
+### Custom Operators
+
+| Operator | Purpose | Implementation |
+|----------|---------|----------------|
+| **DerivedSecrets** | Derive passwords from master key using Argon2id | Shell-operator (Bash + argon2) |
+| **Metabase CNPG** | Auto-register CNPG databases in Metabase | Shell-operator (Bash + curl) |
+| **Gitea Automation** | OAuth setup + GitHub sync | Helm hooks (Playwright + Bash) |
+| **Restrictive Proxy** | Path-restricted HTTP proxy for MikroTik API | Node.js systemd service |
+
+## Cost Analysis
+
+### Initial Capital Expenditure (CapEx)
+
+| Item | Quantity | Unit Price | Total | Notes |
+|------|----------|------------|-------|-------|
+| **Raspberry Pi CM5 Blades** | 5 | ~$120 | $600 | 8GB RAM version |
+| **NVMe SSDs (final)** | 5 | ~$25 | $125 | Budget M.2 2242 drives |
+| **NVMe SSDs (initial, abandoned)** | 2 | ~$80 | $160 | Samsung 990 PRO (too hot) |
+| **MikroTik hEX S** | 1 | ~$200 | $200 | Router + firewall |
+| **Zyxel PoE Switch** | 1 | ~$200 | $200 | 8-port PoE+ |
+| **Cables, Power** | Various | | $100 | Ethernet cables, power supplies |
+| **Total Initial** | | | **$1,385** | One-time cost |
+
+**Lessons Learned:**
+- High-end NVMe SSDs ($160) were overkill and caused thermal issues
+- Budget NVMe SSDs ($125) perform adequately and run cool
+- **Wasted**: $160 on Samsung drives (repurposed for other projects)
+
+### Operational Expenditure (OpEx)
+
+**Monthly Costs:**
+| Item | Calculation | Monthly Cost |
+|------|-------------|--------------|
+| **Electricity** | 62W × 24h × 30d × $0.14/kWh | ~$6.20 |
+| **Internet** | Existing connection | $0 (no additional cost) |
+| **Domain** | zengarden.space | $1.00 (annual / 12) |
+| **Cloudflare** | Free tier | $0 |
+| **Total Monthly** | | **~$7.20** |
+
+**Annual Costs:**
+| Item | Annual Cost |
+|------|-------------|
+| **Electricity** | ~$75 |
+| **Domain** | ~$12 |
+| **Total Annual** | **~$87** |
+
+### Total Cost of Ownership (TCO)
+
+**5-Year TCO:**
+| Item | Cost |
+|------|------|
+| **Initial CapEx** | $1,385 |
+| **5 Years OpEx** | $435 (5 × $87) |
+| **Total** | **$1,820** |
+
+**Cloud Equivalent (AWS):**
+- 3× t4g.medium (2vCPU, 4GB): ~$75/month
+- 2× t4g.small (2vCPU, 2GB): ~$40/month
+- 500GB EBS storage: ~$50/month
+- Load balancer: ~$20/month
+- Data transfer: ~$15/month
+- **Total**: ~$200/month × 60 months = **$12,000**
+
+**Savings:** $10,180 over 5 years (6.6× cheaper)
+
+### Cost Comparison Analysis
+
+**Break-even Point:**
+- CapEx: $1,385
+- Monthly savings vs cloud: $200 - $7 = $193
+- **Break-even**: 1,385 / 193 = **7.2 months**
+
+**After 1 Year:**
+- Total cost: $1,385 + (12 × $7) = $1,469
+- Cloud cost: 12 × $200 = $2,400
+- **Savings**: $931
+
+**After 5 Years:**
+- Total cost: $1,820
+- Cloud cost: $12,000
+- **Savings**: $10,180
+- **ROI**: 559%
+
+## Capacity Planning
+
+### Resource Allocation
+
+**Total Cluster Resources:**
+- **CPU**: 20 cores (5 nodes × 4 cores)
+- **RAM**: 72GB (4 × 16GB + 1 × 8GB)
+- **Storage**: ~1.2TB (5 × 256GB NVMe)
+
+**Reserved for System:**
+- **CPU**: ~2 cores (kubelet, systemd per node)
+- **RAM**: ~12GB (OS + K3s overhead, ~2-3GB per node)
+- **Storage**: ~100GB (OS, logs, etcd, container images)
+
+**Available for Applications:**
+- **CPU**: ~18 cores
+- **RAM**: ~60GB
+- **Storage**: ~1.1TB (node-local PVCs)
+
+### Workload Planning
+
+**Current Workloads:**
+
+| Application | CPU Request | RAM Request | Replicas | Total CPU | Total RAM |
+|-------------|-------------|-------------|----------|-----------|-----------|
+| **ArgoCD** | 200m | 512Mi | 4 | 800m | 2Gi |
+| **Gitea** | 500m | 1Gi | 1 | 500m | 1Gi |
+| **Metabase** | 500m | 1Gi | 1 | 500m | 1Gi |
+| **Victoria Metrics** | 500m | 2Gi | 3 | 1.5 | 6Gi |
+| **Ingress** | 200m | 256Mi | 2 | 400m | 512Mi |
+| **External DNS** | 50m | 128Mi | 1 | 50m | 128Mi |
+| **Cert-Manager** | 100m | 256Mi | 3 | 300m | 768Mi |
+| **Custom Operators** | 100m | 128Mi | 3 | 300m | 384Mi |
+| **Applications** | Variable | Variable | Variable | ~5 | ~10Gi |
+| **Total** | | | | **~9.35** | **~22Gi** |
+
+**Headroom:** ~8.5 cores CPU, ~10GB RAM
+
+### Scaling Considerations
+
+**Horizontal Scaling (add nodes):**
+- **Limit**: Power budget, network ports, physical space
+- **Recommendation**: Max 7-10 nodes before needing more infrastructure
+
+**Vertical Scaling (upgrade nodes):**
+- **RAM**: CM5 available in 2GB, 4GB, 8GB, 16GB (blade005 could upgrade from 8GB to 16GB)
+- **Storage**: Upgrade NVMe to 512GB or 1TB drives (M.2 2242 form factor)
+- **CPU**: Fixed at 4 cores (cannot upgrade)
+
+**When to Scale:**
+- CPU utilization >70% sustained
+- RAM utilization >80% sustained
+- Storage >75% used on any node
+
+## Infrastructure Design Decisions
+
+### Why Raspberry Pi CM5?
+
+| Decision Factor | Evaluation |
+|----------------|------------|
+| **Power Efficiency** | ⭐⭐⭐⭐⭐ 5-8W per node (best in class) |
+| **Cost** | ⭐⭐⭐⭐ $120/node (affordable) |
+| **Performance** | ⭐⭐⭐ ARM Cortex-A76 (adequate for homelab) |
+| **Availability** | ⭐⭐⭐⭐ Good supply (unlike Pi4 shortage era) |
+| **Form Factor** | ⭐⭐⭐⭐⭐ Compact blades (space-efficient) |
+| **Community** | ⭐⭐⭐⭐⭐ Massive Pi community support |
+
+**Alternatives Considered:**
+- **Intel NUC**: 3-5× power, 2× cost, better performance
+- **Used enterprise servers**: Cheap but 10× power consumption
+- **Mini PCs**: Similar cost, higher power, better CPU
+
+### Why K3s over Vanilla Kubernetes?
+
+| Factor | K3s | Vanilla K8s |
+|--------|-----|-------------|
+| **Memory footprint** | ~500MB per node | ~1.5GB per node |
+| **Installation complexity** | Simple (single binary) | Complex (kubeadm) |
+| **ARM64 support** | First-class | Requires compilation |
+| **Batteries included** | Ingress, LB, storage | Requires addons |
+| **Production readiness** | CNCF certified | CNCF certified |
+
+### Why local-path over Distributed Storage?
+
+| Feature | local-path | Ceph/Rook | Longhorn |
+|---------|------------|-----------|----------|
+| **Replication** | ❌ None | ✅ 3-way | ✅ 3-way |
+| **Performance** | ⭐⭐⭐⭐⭐ (direct NVMe) | ⭐⭐⭐ (network overhead) | ⭐⭐⭐ (network overhead) |
+| **Resource overhead** | ⭐⭐⭐⭐⭐ (minimal) | ⭐⭐ (Ceph daemons) | ⭐⭐⭐ (replication) |
+| **Complexity** | ⭐⭐⭐⭐⭐ (trivial) | ⭐⭐ (complex) | ⭐⭐⭐ (moderate) |
+| **Failure tolerance** | ❌ Node-local | ✅ 1 node failure | ✅ 1 node failure |
+
+**Decision**: local-path for simplicity, performance, and resource efficiency in homelab environment where critical data is backed up externally
+
+## Next Steps
+
+Now that infrastructure is planned:
+
+1. Review [Tools & Technology](/introduction/tools) for detailed tool selection rationale
+2. Understand [Security](/introduction/security) planning from infrastructure up
+3. Proceed to [Deployment](/deployment) to implement this plan
+
+---
+
+*This infrastructure planning balances cost, power efficiency, and production-grade capabilities to create a sustainable homelab platform.*

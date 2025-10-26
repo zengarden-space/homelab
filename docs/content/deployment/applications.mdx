@@ -1,0 +1,634 @@
+# Applications Deployment
+
+## Deploy Applications via GitOps
+
+This guide explains how to deploy applications using the GitOps workflow: GitHub → Gitea → Gitea Actions → ArgoCD → Kubernetes.
+
+## Overview
+
+**Application Deployment Flow:**
+
+```
+1. Push code to GitHub (github.com/zengarden-space/<app>)
+       ↓
+2. Gitea sync (auto-syncs to gitea.homelab.int.zengarden.space/zengarden-space/<app>)
+       ↓
+3. Git push triggers Gitea Actions workflow
+       ↓
+4. Gitea Actions: build Docker image, push to Gitea registry
+       ↓
+5. Gitea Actions: update manifests repository with new image tag
+       ↓
+6. ArgoCD watches manifests repository, detects change
+       ↓
+7. ArgoCD syncs application to Kubernetes cluster
+       ↓
+8. Application running in Kubernetes
+```
+
+## Prerequisites
+
+- Core platform deployed (ArgoCD, Gitea running)
+- Gitea-GitHub synchronization working
+- ArgoCD ApplicationSet configured
+- manifests repository exists in Gitea
+
+## Step 1: Verify Gitea-GitHub Sync
+
+### 1.1 Check Sync Job
+
+**Verify sync job completed:**
+```bash
+kubectl -n gitea get jobs
+
+# Expected:
+# NAME          COMPLETIONS   DURATION   AGE
+# gitea-sync    1/1           5m         1h
+```
+
+**Check sync job logs:**
+```bash
+kubectl -n gitea logs job/gitea-sync
+
+# Should show:
+# - Organization 'zengarden-space' created
+# - Repositories synced from GitHub to Gitea
+# - Push mirrors configured (Gitea → GitHub)
+# - ArgoCD webhook created
+```
+
+### 1.2 Verify Repositories in Gitea
+
+**Access Gitea UI:**
+```
+URL: https://gitea.homelab.int.zengarden.space
+Username: admin
+Password: <from kubectl -n gitea get secret gitea-admin>
+```
+
+**Check organization:**
+- Navigate to **zengarden-space** organization
+- Should see repositories synced from GitHub
+- Example repos: `manifests`, `example-app`, etc.
+
+**Verify push mirrors:**
+- Navigate to repository **Settings > Repository > Mirrors**
+- Should see push mirror to GitHub (8h sync interval)
+
+### 1.3 Verify ArgoCD Webhook
+
+**Check webhook in Gitea:**
+- Repository: `manifests`
+- Settings > Webhooks
+- Should see webhook to `https://argocd.homelab.int.zengarden.space/api/webhook`
+- Events: Push, Pull Request, Create, Delete, Release
+
+**Test webhook (optional):**
+```bash
+# Create test commit in manifests repo
+# Webhook should trigger ArgoCD sync
+```
+
+## Step 2: Configure Gitea Actions Runner
+
+### 2.1 Verify Gitea Runner Deployment
+
+**Check runner pods:**
+```bash
+kubectl -n gitea get pods -l app=gitea-runner
+
+# Expected:
+# NAME                            READY   STATUS    RESTARTS   AGE
+# gitea-runner-xxxxx-yyyyy        1/1     Running   0          1h
+```
+
+**Check runner registration:**
+- Gitea UI > Admin Panel > Actions > Runners
+- Should see runner registered
+
+### 2.2 Configure Organization Secrets
+
+**Secrets needed for CI/CD pipelines:**
+
+1. **GITEA_TOKEN**: Personal access token for updating manifests
+2. **DOCKER_USERNAME**: Gitea username (usually `admin`)
+3. **DOCKER_PASSWORD**: Gitea password or token
+
+**Add secrets via Gitea UI:**
+- Organization: `zengarden-space`
+- Settings > Secrets > Actions
+- Add each secret
+
+**Or add via API:**
+```bash
+# Get Gitea admin token
+GITEA_TOKEN=$(kubectl -n gitea get secret gitea-admin -o jsonpath="{.data.apiToken}" | base64 -d)
+
+# Add GITEA_TOKEN secret
+curl -X PUT "https://gitea.homelab.int.zengarden.space/api/v1/orgs/zengarden-space/actions/secrets/GITEA_TOKEN" \
+  -H "Authorization: token $GITEA_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"data\": \"$(echo -n $GITEA_TOKEN | base64)\"}"
+
+# Add DOCKER secrets (similar)
+```
+
+## Step 3: Prepare Application Repository
+
+### 3.1 Application Structure
+
+**Typical application repository structure:**
+
+```
+example-app/
+├── .gitea/
+│   └── workflows/
+│       └── build.yaml           # Gitea Actions workflow
+├── src/
+│   └── ...                       # Application source code
+├── Dockerfile                    # Container build instructions
+├── kubernetes/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   └── kustomization.yaml
+└── README.md
+```
+
+### 3.2 Create Gitea Actions Workflow
+
+**.gitea/workflows/build.yaml:**
+
+```yaml
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Gitea Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: gitea.homelab.int.zengarden.space
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            gitea.homelab.int.zengarden.space/zengarden-space/example-app:latest
+            gitea.homelab.int.zengarden.space/zengarden-space/example-app:${{ github.sha }}
+
+      - name: Checkout manifests repository
+        uses: actions/checkout@v3
+        with:
+          repository: zengarden-space/manifests
+          path: manifests
+          token: ${{ secrets.GITEA_TOKEN }}
+
+      - name: Update manifest with new image
+        run: |
+          cd manifests/example-app
+          kustomize edit set image example-app=gitea.homelab.int.zengarden.space/zengarden-space/example-app:${{ github.sha }}
+          git config user.name "Gitea Actions"
+          git config user.email "actions@gitea.homelab.int"
+          git add .
+          git commit -m "Update example-app to ${{ github.sha }}"
+          git push
+```
+
+### 3.3 Create Kubernetes Manifests
+
+**kubernetes/deployment.yaml:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: example-app
+  template:
+    metadata:
+      labels:
+        app: example-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: gitea.homelab.int.zengarden.space/zengarden-space/example-app:latest
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+```
+
+**kubernetes/service.yaml:**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-app
+spec:
+  selector:
+    app: example-app
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+**kubernetes/ingress.yaml:**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-app
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: internal
+  tls:
+    - hosts:
+        - example-app.homelab.int.zengarden.space
+      secretName: example-app-tls
+  rules:
+    - host: example-app.homelab.int.zengarden.space
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: example-app
+                port:
+                  number: 80
+```
+
+**kubernetes/kustomization.yaml:**
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: example-app
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+images:
+  - name: example-app
+    newName: gitea.homelab.int.zengarden.space/zengarden-space/example-app
+    newTag: latest  # Will be updated by Gitea Actions
+```
+
+## Step 4: Create Manifests Repository Entry
+
+### 4.1 Structure Manifests Repository
+
+**manifests repository structure:**
+
+```
+manifests/
+├── example-app/
+│   ├── deployment.yaml           # Copy from app repo
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   └── kustomization.yaml
+├── another-app/
+│   └── ...
+└── README.md
+```
+
+**Note:** Each directory in `manifests/` becomes an ArgoCD Application
+
+### 4.2 Initialize manifests Repository
+
+```bash
+# Clone manifests repo (create if doesn't exist)
+git clone https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+cd manifests
+
+# Create directory for application
+mkdir -p example-app
+cd example-app
+
+# Copy Kubernetes manifests from application repo
+# (Gitea Actions will update kustomization.yaml with image tags)
+cp ../../example-app/kubernetes/* .
+
+# Commit and push
+git add .
+git commit -m "Add example-app manifests"
+git push
+```
+
+## Step 5: Deploy Application via GitOps
+
+### 5.1 Push Code to Trigger CI/CD
+
+**Push code to GitHub (or Gitea directly):**
+
+```bash
+cd example-app
+git add .
+git commit -m "Initial application code"
+git push origin main
+```
+
+### 5.2 Monitor Gitea Actions Pipeline
+
+**Watch pipeline in Gitea UI:**
+- Repository: `zengarden-space/example-app`
+- Actions tab
+- Should see workflow running
+
+**Or monitor via CLI:**
+```bash
+# Get recent workflow runs (via API)
+curl -s "https://gitea.homelab.int.zengarden.space/api/v1/repos/zengarden-space/example-app/actions/workflows" \
+  -H "Authorization: token $GITEA_TOKEN" | jq
+
+# Check logs (replace <run-id>)
+curl -s "https://gitea.homelab.int.zengarden.space/api/v1/repos/zengarden-space/example-app/actions/runs/<run-id>/logs" \
+  -H "Authorization: token $GITEA_TOKEN"
+```
+
+### 5.3 Verify Image Pushed to Registry
+
+**Check Gitea container registry:**
+- Gitea UI > Organization `zengarden-space` > Packages
+- Should see `example-app` package with tags
+
+**Or via CLI:**
+```bash
+# List packages
+curl -s "https://gitea.homelab.int.zengarden.space/api/v1/orgs/zengarden-space/packages" \
+  -H "Authorization: token $GITEA_TOKEN" | jq
+```
+
+### 5.4 Verify manifests Repository Updated
+
+**Check manifests repo for commit:**
+
+```bash
+cd manifests
+git pull
+
+# Check kustomization.yaml
+cat example-app/kustomization.yaml
+
+# Should show:
+# images:
+#   - name: example-app
+#     newName: gitea.homelab.int.zengarden.space/zengarden-space/example-app
+#     newTag: <git-sha>  # Updated by Gitea Actions
+```
+
+### 5.5 Verify ArgoCD Detected Application
+
+**Check ArgoCD ApplicationSet:**
+
+```bash
+# List applications
+argocd app list
+
+# Should show:
+# NAME              CLUSTER                         NAMESPACE      PROJECT  STATUS  HEALTH
+# example-app       https://kubernetes.default.svc  example-app    default  Synced  Healthy
+```
+
+**View application in ArgoCD UI:**
+- URL: `https://argocd.homelab.int.zengarden.space`
+- Navigate to application `example-app`
+- Should show all resources (Deployment, Service, Ingress)
+
+### 5.6 Verify Application Running in Kubernetes
+
+**Check namespace and pods:**
+
+```bash
+kubectl get ns example-app
+
+kubectl -n example-app get pods
+# Expected:
+# NAME                           READY   STATUS    RESTARTS   AGE
+# example-app-xxxxx-yyyyy        1/1     Running   0          5m
+# example-app-xxxxx-zzzzz        1/1     Running   0          5m
+```
+
+**Check service and ingress:**
+
+```bash
+kubectl -n example-app get svc,ingress
+
+# Ingress should have address assigned
+```
+
+**Test application:**
+
+```bash
+curl https://example-app.homelab.int.zengarden.space
+
+# Should return application response
+```
+
+## Step 6: Make Updates (GitOps Workflow)
+
+### 6.1 Update Application Code
+
+**Make code changes:**
+
+```bash
+cd example-app/src
+# Edit application code
+nano app.py
+
+# Commit and push
+git add .
+git commit -m "Update application feature"
+git push origin main
+```
+
+### 6.2 Automatic Deployment
+
+**Gitea Actions automatically:**
+1. Builds new Docker image with commit SHA tag
+2. Pushes to Gitea registry
+3. Updates manifests repository with new tag
+4. Commits and pushes to manifests repo
+
+**ArgoCD automatically:**
+1. Detects change in manifests repository (via webhook)
+2. Syncs application to cluster
+3. Performs rolling update
+
+**Monitor deployment:**
+
+```bash
+# Watch ArgoCD sync
+argocd app get example-app --watch
+
+# Watch pod rollout
+kubectl -n example-app rollout status deployment/example-app
+```
+
+## Troubleshooting
+
+### Gitea Actions Workflow Fails
+
+**Check workflow logs:**
+- Gitea UI > Repository > Actions > Failed workflow
+- Click on failed step to see logs
+
+**Common issues:**
+- Docker build failures: Check Dockerfile syntax
+- Registry push failures: Verify DOCKER_USERNAME/PASSWORD secrets
+- manifests update failures: Verify GITEA_TOKEN secret has write permissions
+
+### ArgoCD Not Detecting Application
+
+**Check ApplicationSet:**
+
+```bash
+kubectl -n argocd get applicationset applications -o yaml
+
+# Verify git.directories includes manifests/*
+```
+
+**Check ArgoCD logs:**
+
+```bash
+kubectl -n argocd logs -l app.kubernetes.io/name=argocd-applicationset-controller --tail=50
+```
+
+**Manually create Application (if needed):**
+
+```bash
+argocd app create example-app \
+  --repo https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git \
+  --path example-app \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace example-app \
+  --sync-policy automated \
+  --self-heal \
+  --auto-prune
+```
+
+### ArgoCD Sync Fails
+
+**Check ArgoCD application status:**
+
+```bash
+argocd app get example-app
+
+# Look for sync errors
+```
+
+**Common issues:**
+- Invalid Kubernetes manifests: Validate YAML with `kubectl apply --dry-run`
+- Namespace not created: ArgoCD should auto-create with `CreateNamespace=true`
+- Image pull errors: Verify image tag exists in registry
+
+### Application Pods CrashLooping
+
+**Check pod logs:**
+
+```bash
+kubectl -n example-app logs example-app-xxxxx-yyyyy
+
+# Check events
+kubectl -n example-app get events --sort-by='.lastTimestamp'
+```
+
+**Common issues:**
+- Image not found: Verify Gitea registry URL and credentials
+- Pod Security Admission violations: Ensure pod security context is set
+- Resource limits: Adjust CPU/memory requests/limits
+
+## Best Practices
+
+### Security
+
+1. **Always use image tags (not `latest`)**
+   - Gitea Actions uses commit SHA: `:${{ github.sha }}`
+   - Ensures reproducible deployments
+
+2. **Set pod security context**
+   - `runAsNonRoot: true`
+   - `readOnlyRootFilesystem: true`
+   - Drop ALL capabilities
+
+3. **Use resource limits**
+   - Prevent resource exhaustion
+   - Helps Kubernetes scheduler
+
+### GitOps
+
+1. **Separate application code from manifests**
+   - Application repo: Source code + Dockerfile
+   - Manifests repo: Kubernetes YAML
+
+2. **Use Kustomize for manifest management**
+   - Easy image tag updates
+   - Overlay support for environments
+
+3. **Enable ArgoCD auto-sync**
+   - Automatic deployment on manifest changes
+   - Self-healing if cluster state drifts
+
+### CI/CD
+
+1. **Use semantic versioning for releases**
+   - Git tags trigger release builds
+   - Example: `v1.0.0`, `v1.1.0`
+
+2. **Add tests to Gitea Actions**
+   - Unit tests, integration tests
+   - Fail fast on test failures
+
+3. **Scan container images for vulnerabilities**
+   - Add scanning step to workflow
+   - Example: Trivy, Grype
+
+## Next Steps
+
+Applications deployed! Learn about:
+
+1. [Operations](/operations) - Ongoing maintenance and monitoring
+2. [Monitoring](/operations/monitoring) - Set up dashboards and alerts
+
+---
+
+*GitOps workflow complete. Applications deploy automatically from Git commits to running Kubernetes pods!*

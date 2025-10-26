@@ -14,7 +14,7 @@ releases:
           - service
           - crd
         domainFilters:
-          - homelab.int.zengarden.space
+          - homelab.int.{{ .Values.domain }}
         provider:
           name: webhook
           securityContext:
@@ -45,7 +45,7 @@ releases:
               - name: MIKROTIK_DEFAULT_COMMENT
                 value: Managed by ExternalDNS
               - name: MIKROTIK_BASEURL
-                value: http://mikrotik-proxy.homelab.int.zengarden.space
+                value: http://mikrotik-proxy.homelab.int.{{ .Values.domain }}
             livenessProbe:
               httpGet:
                 path: /healthz

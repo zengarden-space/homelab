@@ -42,11 +42,11 @@ releases:
       - cloudflare:
           ingress:
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
-              hostname: "zengarden.space"
+              hostname: "{{ .Values.domain }}"
               originRequest:
                   noTLSVerify: true
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
-              hostname: "*.zengarden.space"
+              hostname: "*.{{ .Values.domain }}"
               originRequest:
                   noTLSVerify: true          
             - service: https://ingress-nginx-external-controller.external-tunnel.svc

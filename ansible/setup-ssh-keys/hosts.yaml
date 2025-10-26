@@ -11,5 +11,5 @@ all:
     blade005:
       ansible_host: blade005
   vars:
-    ansible_user: oleksiyp
+    ansible_user: ansible
     ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

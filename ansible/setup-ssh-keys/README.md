@@ -12,14 +12,14 @@ This runbook sets up seamless SSH access between blade001, blade002, blade003, b
 
 - Ansible must be installed on the machine running this playbook
 - You must have SSH access (with password) to all target hosts
-- The user account (`oleksiyp`) must exist on all hosts
+- The user account (`ansible`) must exist on all hosts
 - Python must be available on all target hosts
 
 ## Usage
 
 1. **Run the setup:**
    ```bash
-   cd /home/oleksiyp/dev/zengarden/basic-infra/ansible/ssh-setup
+   cd /path/to/homelab/ansible/setup-ssh-keys
    ./install.sh
    ```
 

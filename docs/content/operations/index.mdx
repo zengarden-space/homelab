@@ -60,8 +60,8 @@ kubectl logs -n <namespace> <pod-name> --previous
 **SSH Access to Nodes**:
 ```bash
 # From home network or VPN
-ssh oleksiyp@blade001
-ssh oleksiyp@blade002
+ssh ansible@blade001
+ssh ansible@blade002
 # ... blade003, blade004, blade005
 ```
 
@@ -325,13 +325,13 @@ kubectl get pods -n cert-manager
 workers:
   hosts:
     blade004:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade004
     blade005:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade005
     blade006:  # New node
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade006
 ```
 
@@ -433,7 +433,7 @@ receivers:
 **Query examples**:
 ```bash
 # SSH to master node
-ssh oleksiyp@blade001
+ssh ansible@blade001
 
 # Recent API calls
 sudo tail -100 /var/lib/rancher/k3s/server/logs/audit.log | jq
@@ -631,7 +631,7 @@ kubectl logs -n cert-manager deployment/cert-manager
 **1. etcd backup**:
 ```bash
 # On master node
-ssh oleksiyp@blade001
+ssh ansible@blade001
 sudo k3s etcd-snapshot save --name manual-backup-$(date +%Y%m%d)
 
 # List snapshots
@@ -675,7 +675,7 @@ argocd app sync my-app
 **etcd restore** (disaster recovery):
 ```bash
 # On master node
-ssh oleksiyp@blade001
+ssh ansible@blade001
 sudo k3s server \
   --cluster-reset \
   --cluster-reset-restore-path=/var/lib/rancher/k3s/server/db/snapshots/manual-backup-20240101.zip

@@ -17,6 +17,7 @@ set +a
 
 echo "Installing restrictive-proxy on all nodes..."
 ansible-playbook -i hosts.yaml \
+  -e "domain=$DOMAIN" \
   -e "mikrotik_password=$MIKROTIK_ADMIN_PASSWORD" \
   install.yaml
 

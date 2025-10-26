@@ -1,0 +1,569 @@
+# Maintenance
+
+## Regular Maintenance Tasks
+
+This guide covers scheduled maintenance tasks to keep the homelab running smoothly, securely, and reliably.
+
+## Maintenance Approach
+
+The homelab is designed for **minimal maintenance** through:
+- Automated updates where safe
+- Self-healing components (ArgoCD, Kubernetes, Ceph)
+- Infrastructure as code (reproducible)
+- GitOps (declarative, auditable)
+
+However, **manual oversight** ensures:
+- Security updates are applied
+- Capacity is managed proactively
+- Configuration drift is detected
+- Backups are verified
+
+## Daily Tasks (Automated)
+
+These tasks run automatically, no intervention required:
+
+| Task | Automation | Verification |
+|------|------------|--------------|
+| **etcd snapshots** | K3s built-in (daily 12:00 AM) | Check `/var/lib/rancher/k3s/server/db/snapshots/` |
+| **Certificate renewal** | cert-manager (30 days before expiry) | Check `kubectl get certificates -A` |
+| **DNS synchronization** | external-dns (on ingress change) | Check MikroTik DNS records |
+| **ArgoCD sync** | ArgoCD (every 3 minutes) | Check `argocd app list` |
+| **Metrics collection** | Victoria Metrics (every 30s) | Check Grafana dashboards |
+| **Ceph rebalancing** | Rook operator (on OSD/node changes) | Check `kubectl -n rook-ceph get cephcluster` |
+
+## Weekly Tasks (Manual)
+
+### Monday: Review & Triage
+
+**Goal:** Identify issues before they become problems
+
+```bash
+# 1. Check cluster health
+kubectl get nodes
+kubectl get pods --all-namespaces | grep -v Running
+
+# 2. Review ArgoCD application status
+argocd app list
+# All apps should be: Healthy, Synced
+
+# 3. Check Grafana dashboards
+open https://grafana.homelab.int.zengarden.space
+# Review:
+# - Node resource utilization (CPU, RAM, storage)
+# - Pod restart rates
+# - Ingress error rates
+
+# 4. Review AlertManager
+open https://alerts.homelab.int.zengarden.space
+# Any firing alerts?
+
+# 5. Check Gitea sync job logs
+kubectl -n gitea logs job/gitea-sync --tail=100
+# Verify GitHub<->Gitea sync is healthy
+```
+
+**Expected Duration:** 15-20 minutes
+
+### Wednesday: Security Review
+
+**Goal:** Ensure security posture remains strong
+
+```bash
+# 1. Check certificate expiration
+kubectl get certificates --all-namespaces -o json | \
+  jq -r '.items[] | select(.status.notAfter != null) | "\(.metadata.namespace)/\(.metadata.name): \(.status.notAfter)"' | \
+  while read line; do
+    expiry=$(echo $line | cut -d: -f2)
+    days=$((( $(date -d "$expiry" +%s) - $(date +%s) ) / 86400))
+    if [ $days -lt 30 ]; then
+      echo "⚠️  $line ($days days remaining)"
+    else
+      echo "✅ $line ($days days remaining)"
+    fi
+  done
+
+# 2. Review Kubernetes audit logs (recent suspicious activity)
+ssh ubuntu@192.168.77.170
+sudo cat /var/log/kubernetes/audit.log | jq 'select(.responseStatus.code >= 400)' | tail -20
+
+# 3. Check for failed authentication attempts
+sudo journalctl -u k3s | grep "authentication failed" | tail -20
+
+# 4. Review RBAC denials
+kubectl get events --all-namespaces | grep "Forbidden"
+
+# 5. Check for Pod Security violations
+kubectl get events --all-namespaces | grep "PodSecurity"
+```
+
+**Expected Duration:** 10-15 minutes
+
+### Friday: Capacity Planning
+
+**Goal:** Ensure resources are not nearing limits
+
+```bash
+# 1. Node resource utilization
+kubectl top nodes
+# Warning if any node >70% CPU or >80% RAM sustained
+
+# 2. Storage utilization
+kubectl -n rook-ceph exec -it $(kubectl -n rook-ceph get pod -l app=rook-ceph-tools -o jsonpath='{.items[0].metadata.name}') -- ceph df
+
+# 3. PVC usage
+kubectl get pvc --all-namespaces -o json | \
+  jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): \(.status.capacity.storage)"'
+
+# 4. Check for evicted pods (indicates resource pressure)
+kubectl get pods --all-namespaces --field-selector status.phase=Failed | grep Evicted
+
+# 5. Review resource requests/limits
+kubectl get pods --all-namespaces -o json | \
+  jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): CPU request=\(.spec.containers[0].resources.requests.cpu // "none"), RAM request=\(.spec.containers[0].resources.requests.memory // "none")"'
+```
+
+**Expected Duration:** 15-20 minutes
+
+## Monthly Tasks (Manual)
+
+### First Monday: Software Updates
+
+**Goal:** Keep software current with security patches
+
+#### 1. Update K3s
+
+```bash
+# Check current version
+kubectl version --short
+
+# Check latest K3s version
+curl -s https://api.github.com/repos/k3s-io/k3s/releases/latest | grep tag_name
+
+# Update Ansible playbook
+cd ../ansible/install-k3s
+nano install.yaml
+# Edit: k3s_version: v1.32.5+k3s1 (example)
+
+# Update cluster (one node at a time for HA)
+ansible-playbook -i hosts.yaml install.yaml --limit blade001
+# Wait for blade001 to rejoin
+ansible-playbook -i hosts.yaml install.yaml --limit blade002
+# ... continue for all nodes
+
+# Verify all nodes updated
+kubectl get nodes -o wide
+```
+
+**Expected Duration:** 1-2 hours
+
+#### 2. Update Helm Charts
+
+```bash
+cd ../helmfile
+
+# Update chart versions in helmfile.yaml.gotmpl files
+# Example: cert-manager
+cd cert-manager
+nano helmfile.yaml.gotmpl
+# Edit: version: 1.18.2 → 1.19.0
+
+# Check diff
+helmfile diff
+
+# Apply update
+helmfile apply
+
+# Verify
+kubectl -n cert-manager get pods
+
+# Repeat for other components:
+# - argocd
+# - gitea
+# - victoria-metrics
+# - metabase
+# - external-dns
+# - ingress-nginx
+```
+
+**Expected Duration:** 2-3 hours
+
+#### 3. Update OS Packages
+
+```bash
+# Update all nodes
+for i in {11..15}; do
+  echo "Updating blade$(printf %03d $(($i - 10)))..."
+  ssh ubuntu@192.168.77.$i 'sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y'
+done
+
+# Reboot nodes if kernel updated (one at a time for HA)
+ssh ubuntu@192.168.77.170 'sudo reboot'
+# Wait 5 minutes, verify node back
+kubectl get nodes
+# Continue for other nodes
+```
+
+**Expected Duration:** 1-2 hours
+
+### Second Monday: Backup Verification
+
+**Goal:** Ensure backups are restorable
+
+#### 1. Verify etcd Snapshots
+
+```bash
+# SSH to master node
+ssh ubuntu@192.168.77.170
+
+# List snapshots
+sudo k3s etcd-snapshot ls
+
+# Verify recent snapshots exist (daily)
+# Expected: Snapshots from last 7+ days
+
+# Test restore to temp cluster (optional, advanced)
+# DO NOT run on production cluster!
+```
+
+#### 2. Test Application Backup/Restore
+
+```bash
+# Create test namespace
+kubectl create namespace backup-test
+
+# Deploy test application
+kubectl -n backup-test create deployment nginx --image=nginx
+kubectl -n backup-test expose deployment nginx --port=80
+
+# Verify running
+kubectl -n backup-test get pods
+
+# Delete namespace
+kubectl delete namespace backup-test
+
+# Recreate from scratch (simulates restore)
+kubectl create namespace backup-test
+kubectl -n backup-test create deployment nginx --image=nginx
+kubectl -n backup-test expose deployment nginx --port=80
+
+# Verify working
+kubectl -n backup-test get pods
+```
+
+#### 3. Backup Configuration Files
+
+```bash
+# Backup env.yaml files (contain no secrets, but configurations)
+cd ../helmfile
+tar -czf ~/homelab-env-$(date +%Y%m%d).tar.gz */env.yaml
+
+# Backup integrations.yaml (CONTAINS SECRETS - encrypt!)
+kubectl -n integrations get secret integrations -o yaml > ~/integrations-backup-$(date +%Y%m%d).yaml
+# IMPORTANT: Store securely (password manager, encrypted drive)
+
+# Backup master password (for DerivedSecrets)
+kubectl -n derived-secret-operator get secret master-password -o jsonpath="{.data.password}" | base64 -d
+# IMPORTANT: Store in password manager
+```
+
+### Third Monday: Security Audit
+
+**Goal:** Review and update security policies
+
+#### 1. Review RBAC Permissions
+
+```bash
+# List all ClusterRoleBindings
+kubectl get clusterrolebindings
+
+# Review admin access (should be limited)
+kubectl get clusterrolebindings -o json | \
+  jq -r '.items[] | select(.roleRef.name=="cluster-admin") | "\(.metadata.name): \(.subjects)"'
+
+# Expected: Only your OIDC user should have cluster-admin
+
+# Review service account permissions
+kubectl get clusterrolebindings -o json | \
+  jq -r '.items[] | select(.subjects[]?.kind=="ServiceAccount") | "\(.metadata.name): \(.subjects)"'
+```
+
+#### 2. Review Firewall Rules
+
+```bash
+# SSH to MikroTik
+ssh admin@192.168.77.1
+
+# List firewall rules
+/ip firewall filter print
+
+# Verify:
+# - VLAN88 (home) blocked from VLAN77 except 80/443
+# - VLAN100 (management) has no inbound access
+# - WireGuard VPN blocked from VLAN88/100
+```
+
+#### 3. Review Network Policies
+
+```bash
+# List all NetworkPolicies
+kubectl get networkpolicies --all-namespaces
+
+# Verify isolation
+kubectl -n production get networkpolicy
+
+# Test connectivity (should be blocked)
+kubectl run test -it --rm --image=alpine/curl -- \
+  curl -m 5 http://service-in-another-namespace.another-namespace.svc.cluster.local
+# Expected: Timeout (blocked by NetworkPolicy)
+```
+
+#### 4. Check for Security Updates
+
+```bash
+# Check for CVEs in Kubernetes
+curl -s https://kubernetes.io/docs/reference/issues-security/official-cve-feed/index.json | jq
+
+# Check for CVEs in container images (using Trivy)
+# Install Trivy
+wget https://github.com/aquasecurity/trivy/releases/download/v0.50.0/trivy_0.50.0_Linux-ARM64.deb
+sudo dpkg -i trivy_0.50.0_Linux-ARM64.deb
+
+# Scan images
+trivy image gitea.homelab.int.zengarden.space/zengarden-space/my-app:latest
+```
+
+### Fourth Monday: Cleanup & Optimization
+
+**Goal:** Remove unused resources, optimize performance
+
+#### 1. Clean Up Unused Resources
+
+```bash
+# Remove unused container images on nodes
+for i in {11..15}; do
+  echo "Cleaning blade$(printf %03d $(($i - 10)))..."
+  ssh ubuntu@192.168.77.$i 'sudo k3s crictl rmi --prune'
+done
+
+# Remove unused PVCs (manual review)
+kubectl get pvc --all-namespaces
+# Delete unused:
+# kubectl delete pvc <pvc-name> -n <namespace>
+
+# Remove completed jobs older than 7 days
+kubectl get jobs --all-namespaces -o json | \
+  jq -r '.items[] | select(.status.succeeded==1 and (.status.completionTime | fromdateiso8601) < (now - 604800)) | "\(.metadata.namespace) \(.metadata.name)"' | \
+  while read ns name; do
+    kubectl delete job $name -n $ns
+  done
+```
+
+#### 2. Optimize Resource Requests/Limits
+
+```bash
+# Review actual vs requested resources
+kubectl top pods --all-namespaces
+
+# Compare to requests
+kubectl get pods --all-namespaces -o json | \
+  jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): request=\(.spec.containers[0].resources.requests.cpu // "none")/\(.spec.containers[0].resources.requests.memory // "none")"'
+
+# Adjust requests/limits in manifests if needed
+# Rule of thumb:
+# - Request = 75% of observed usage
+# - Limit = 150% of observed usage
+```
+
+#### 3. Review and Update Monitoring Dashboards
+
+```bash
+# Access Grafana
+open https://grafana.homelab.int.zengarden.space
+
+# Review dashboards:
+# - Are metrics still relevant?
+# - Add new panels for new services
+# - Remove panels for removed services
+```
+
+## Quarterly Tasks (Manual)
+
+### Full Security Audit
+
+**Goal:** Comprehensive security review
+
+1. **Penetration Testing** (optional)
+   - Use tools like `kube-bench` for CIS Kubernetes Benchmark
+   - Run `kube-hunter` for attack surface analysis
+
+2. **Review Threat Model**
+   - Update threat model document
+   - Review mitigation strategies
+   - Identify new threats
+
+3. **Security Compliance Check**
+   - OWASP Kubernetes Top 10
+   - CIS Kubernetes Benchmark
+   - Pod Security Standards
+
+### Performance Testing
+
+**Goal:** Identify performance bottlenecks
+
+1. **Load Testing**
+   - Use `k6` or `locust` to simulate load
+   - Identify resource bottlenecks
+   - Optimize as needed
+
+2. **Storage Performance**
+   - Test Ceph read/write performance
+   - Use `fio` for benchmark
+   - Compare to baseline
+
+3. **Network Performance**
+   - Test pod-to-pod latency
+   - Test ingress throughput
+   - Identify bottlenecks
+
+### Documentation Review
+
+**Goal:** Keep documentation current
+
+1. **Update Architecture Diagrams**
+   - Reflect current state
+   - Add new components
+   - Remove deprecated components
+
+2. **Update Runbooks**
+   - Review troubleshooting procedures
+   - Add new procedures for new services
+   - Remove outdated procedures
+
+3. **Review This Maintenance Guide**
+   - Are tasks still relevant?
+   - Add new tasks as needed
+   - Remove obsolete tasks
+
+## Incident-Driven Maintenance
+
+### Post-Incident Review
+
+**After any significant incident:**
+
+1. **Document Timeline**
+   - When did it start?
+   - When was it detected?
+   - When was it resolved?
+
+2. **Root Cause Analysis**
+   - What was the root cause?
+   - Why wasn't it caught earlier?
+
+3. **Preventive Measures**
+   - What changes prevent recurrence?
+   - Add monitoring/alerting
+   - Update runbooks
+
+4. **Update Documentation**
+   - Add to troubleshooting guide
+   - Update architecture if changed
+   - Share learnings
+
+## Maintenance Calendar
+
+**Example maintenance schedule:**
+
+```
+Week 1:
+  Mon: Review & Triage (weekly)
+  Mon: Software Updates (monthly)
+  Wed: Security Review (weekly)
+  Fri: Capacity Planning (weekly)
+
+Week 2:
+  Mon: Review & Triage (weekly)
+  Mon: Backup Verification (monthly)
+  Wed: Security Review (weekly)
+  Fri: Capacity Planning (weekly)
+
+Week 3:
+  Mon: Review & Triage (weekly)
+  Mon: Security Audit (monthly)
+  Wed: Security Review (weekly)
+  Fri: Capacity Planning (weekly)
+
+Week 4:
+  Mon: Review & Triage (weekly)
+  Mon: Cleanup & Optimization (monthly)
+  Wed: Security Review (weekly)
+  Fri: Capacity Planning (weekly)
+
+Quarter End:
+  Full Security Audit
+  Performance Testing
+  Documentation Review
+```
+
+## Maintenance Checklist Template
+
+**Copy this for each maintenance session:**
+
+```markdown
+# Maintenance - [DATE]
+
+## Pre-Maintenance
+- [ ] Notify users (if applicable)
+- [ ] Review last maintenance notes
+- [ ] Backup etcd snapshot
+
+## Tasks
+- [ ] Check cluster health
+- [ ] Review ArgoCD status
+- [ ] Review Grafana dashboards
+- [ ] Review AlertManager
+- [ ] [Add task-specific items]
+
+## Issues Found
+- [ ] Issue 1: [description]
+- [ ] Issue 2: [description]
+
+## Actions Taken
+- [ ] Action 1: [description]
+- [ ] Action 2: [description]
+
+## Post-Maintenance
+- [ ] Verify cluster health
+- [ ] Update documentation
+- [ ] Schedule follow-up if needed
+
+## Notes
+[Additional notes]
+```
+
+## Automation Opportunities
+
+**Consider automating:**
+
+1. **Weekly health report**
+   - Script to check cluster health
+   - Email/notify summary
+
+2. **Certificate expiration alerts**
+   - Already handled by AlertManager
+   - Could add email notifications
+
+3. **Backup verification**
+   - Automated etcd restore test (separate cluster)
+
+4. **Dependency updates**
+   - Renovate bot for Helm charts
+   - Dependabot for application dependencies
+
+## Next Steps
+
+- Review [Monitoring](/operations/monitoring) for dashboard and alert setup
+- See [main Operations Guide](/operations) for troubleshooting procedures
+
+---
+
+*Regular maintenance ensures long-term reliability, security, and performance of the homelab platform.*

@@ -35,7 +35,7 @@
     - name: Remove any existing LVM volumes on NVMe
       shell: |
         # Remove any existing LVM volumes on NVMe
-        for vg in $(vgs --noheadings -o vg_name | grep -E '(ceph|k3s)' || true); do
+        for vg in $(vgs --noheadings -o vg_name | grep -E 'k3s' || true); do
           echo "Removing VG: $vg"
           vgremove -f "$vg" || true
         done

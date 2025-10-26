@@ -2,11 +2,14 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# Domain configuration
+domain: zengarden.space
+
 # Organization configuration
 organization:
   name: "zengarden-space"
   description: "ZenGarden Space Organization"
-  website: "https://zengarden.space"
+  website: ""  # Set dynamically via helmfile
   visibility: "public"
 
 # Gitea configuration

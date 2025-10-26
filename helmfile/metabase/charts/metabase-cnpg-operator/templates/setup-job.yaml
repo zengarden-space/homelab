@@ -42,17 +42,17 @@ spec:
         - name: METABASE_ADMIN_EMAIL
           valueFrom:
             secretKeyRef:
-              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              name: {{ include "metabase-cnpg-operator.fullname" . }}-secrets
               key: admin-email
         - name: METABASE_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              name: {{ include "metabase-cnpg-operator.fullname" . }}-secrets
               key: admin-password
         - name: METABASE_GOOGLE_CLIENT_ID
           valueFrom:
             secretKeyRef:
-              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              name: {{ include "metabase-cnpg-operator.fullname" . }}-integrations
               key: google-client-id
         command:
         - /bin/sh

@@ -39,7 +39,7 @@ releases:
           enabled: true
           className: internal
           hosts:
-            - host: gitea.homelab.int.zengarden.space
+            - host: gitea.homelab.int.{{ .Values.domain }}
               paths:
                 - path: /
                   pathType: Prefix
@@ -48,7 +48,7 @@ releases:
             nginx.ingress.kubernetes.io/proxy-body-size: 500m
           tls:
             - hosts:
-                - gitea.homelab.int.zengarden.space
+                - gitea.homelab.int.{{ .Values.domain }}
               secretName: gitea-tls
         strategy:
           type: RollingUpdate
@@ -60,7 +60,7 @@ releases:
             - name: GITEA__ACTIONS__ENABLED
               value: "true"
             - name: GITEA__WEBHOOK__ALLOWED_HOST_LIST
-              value: "argocd.homelab.int.zengarden.space"
+              value: "argocd.homelab.int.{{ .Values.domain }}"
         postgresql-ha:
           service:
             ports:
@@ -75,9 +75,17 @@ releases:
     chart: ./charts/gitea-runner
     needs:
       - gitea
+    values:
+      - domain: {{ .Values.domain }}
+        gitea:
+          url: https://gitea.homelab.int.{{ .Values.domain }}
 
   - name: gitea-automation
     namespace: gitea
     chart: ./charts/gitea-automation
     needs:
       - gitea
+    values:
+      - domain: {{ .Values.domain }}
+        organization:
+          website: https://{{ .Values.domain }}

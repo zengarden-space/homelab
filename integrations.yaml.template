@@ -19,16 +19,6 @@ stringData:
   cloudflareAccount: <CLOUDFLARE_ACCOUNT_EMAIL>
   cloudflareToken: "<CLOUDFLARE_API_TOKEN>"
 ---
-# Secret for external-dns (MikroTik credentials)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: external-dns
-  namespace: integrations
-type: Opaque
-stringData:
-  baseUrl: http://blade001.homelab.int.zengarden.space:555
----
 # Secret for external-tunnel (Cloudflare Tunnel)
 apiVersion: v1
 kind: Secret

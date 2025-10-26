@@ -1,32 +1,26 @@
 bootstrapMaster:
   hosts:
     blade001:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade001
-  vars:
-    domain: zengarden.space
 
 masters:
   hosts:
     blade002:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade002
     blade003:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade003
-  vars:
-    domain: zengarden.space
 
 workers:
   hosts:
     blade004:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade004
     blade005:
-      ansible_user: oleksiyp
+      ansible_user: ansible
       ansible_host: blade005
-  vars:
-    domain: zengarden.space
 
 pies:
   children:
@@ -35,4 +29,3 @@ pies:
     workers:
   vars:
     k3s_version: v1.32.4+k3s1
-    domain: zengarden.space

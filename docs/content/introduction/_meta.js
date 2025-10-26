@@ -1,5 +1,7 @@
 export default {
   index: "Overview",
-  philosophy: "Why a Homelab?",
-  "design-principles": "Design Principles"
+  "architecture-design": "Architecture Design",
+  "infrastructure-planning": "Infrastructure Planning",
+  tools: "Tools & Technology",
+  security: "Security"
 }

@@ -1,11 +1,14 @@
+# Domain configuration
+domain: zengarden.space
+
 # ArgoCD ApplicationSet configuration
 applicationSet:
   name: applications
   namespace: argocd
-  
+
   # Git repository configuration
   git:
-    repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+    repoURL: ""  # Set dynamically via helmfile
     revision: main
     manifestsPath: "manifests/*"
   

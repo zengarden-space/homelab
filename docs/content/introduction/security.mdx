@@ -1,0 +1,763 @@
+# Security
+
+## Defense-in-Depth Strategy
+
+This homelab implements **security by default** with multiple layers of protection. Security is not an afterthought but a foundational design principle built from the ground up.
+
+## Security Layers
+
+```
+┌─────────────────────────────────────────┐
+│ Layer 7: Audit & Monitoring             │
+│  - Kubernetes audit logs                │
+│  - Metrics and alerting                 │
+│  - Security event detection             │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 6: Application Security           │
+│  - Non-root containers                  │
+│  - Read-only root filesystems           │
+│  - Capability dropping                  │
+│  - AppArmor/seccomp profiles            │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 5: Pod Security                   │
+│  - Pod Security Admission (Restricted)  │
+│  - RBAC policies                        │
+│  - Secrets encryption at rest           │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 4: Network Policies               │
+│  - Cilium NetworkPolicy                 │
+│  - Namespace isolation                  │
+│  - Pod-to-pod restrictions              │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 3: Ingress Security               │
+│  - ModSecurity WAF (external)           │
+│  - TLS 1.3 termination                  │
+│  - Rate limiting                        │
+│  - Certificate management               │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 2: Cluster Network                │
+│  - Cilium CNI with eBPF                 │
+│  - Encrypted pod-to-pod (optional)      │
+│  - Service mesh capabilities            │
+└─────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ Layer 1: Network Segmentation           │
+│  - VLAN isolation                       │
+│  - Stateful firewall (MikroTik)         │
+│  - VPN access control                   │
+└─────────────────────────────────────────┘
+```
+
+## Layer 1: Network Segmentation
+
+### VLAN Isolation
+
+**Design Rationale**: Isolate trust zones to limit blast radius
+
+| VLAN | Purpose | Trust Level | Access Policy |
+|------|---------|-------------|---------------|
+| **VLAN77** (Cluster) | K3s nodes | Medium | Internet yes, VLAN88 no, VLAN100 no |
+| **VLAN88** (Home) | Personal devices | Low | Internet yes, VLAN77:80/443 only |
+| **VLAN100** (Management) | Admin workstation | High | All networks (no inbound) |
+| **WireGuard VPN** | Remote access | Medium | VLAN77 + pods, no VLAN88/100 |
+
+### Firewall Rules (MikroTik)
+
+**Default Policy**: Deny all, explicit allow
+
+**VLAN77 (Cluster) Rules:**
+```routeros
+# Allow established/related connections
+/ip firewall filter add chain=forward connection-state=established,related action=accept
+
+# Allow VLAN100 (management) to VLAN77 (cluster)
+/ip firewall filter add chain=forward src-address=192.168.100.0/24 dst-address=192.168.77.0/24 action=accept
+
+# Allow VLAN88 (home) to VLAN77 ports 80,443 only (web services)
+/ip firewall filter add chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=80,443 action=accept
+
+# Allow WireGuard VPN to VLAN77
+/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.77.0/24 action=accept
+
+# Allow WireGuard VPN to pod network (10.42.0.0/16)
+/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=10.42.0.0/16 action=accept
+
+# Allow WireGuard VPN to service network (10.43.0.0/16)
+/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=10.43.0.0/16 action=accept
+
+# Block VLAN88 to VLAN77 (other ports)
+/ip firewall filter add chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 action=drop
+
+# Block all to VLAN100 (management isolation)
+/ip firewall filter add chain=forward dst-address=192.168.100.0/24 action=drop
+
+# Allow VLAN77 to internet
+/ip firewall filter add chain=forward src-address=192.168.77.0/24 out-interface=eth1 action=accept
+
+# Default drop
+/ip firewall filter add chain=forward action=drop
+```
+
+**VLAN100 (Management) Rules:**
+```routeros
+# Allow VLAN100 to all destinations (admin access)
+/ip firewall filter add chain=forward src-address=192.168.100.0/24 action=accept
+
+# Block all inbound to VLAN100 (no compromise path)
+/ip firewall filter add chain=forward dst-address=192.168.100.0/24 action=drop
+```
+
+**WireGuard VPN Rules:**
+```routeros
+# Block WireGuard VPN to VLAN88 (home network)
+/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.88.0/24 action=drop
+
+# Block WireGuard VPN to VLAN100 (management)
+/ip firewall filter add chain=forward src-address=10.8.0.0/24 dst-address=192.168.100.0/24 action=drop
+```
+
+### NAT Configuration
+
+```routeros
+# Masquerade outbound traffic to internet
+/ip firewall nat add chain=srcnat out-interface=eth1 action=masquerade
+
+# Port forwarding for WireGuard VPN
+/ip firewall nat add chain=dstnat protocol=udp dst-port=51820 to-addresses=192.168.77.174 to-ports=51820
+```
+
+## Layer 2: Cluster Network Security
+
+### Cilium CNI with eBPF
+
+**Security Features:**
+- **eBPF-based filtering**: Kernel-level packet filtering (faster, more secure than iptables)
+- **Identity-based security**: Policies based on pod identities, not IPs
+- **Encrypted pod-to-pod** (optional): WireGuard encryption for pod traffic
+- **DNS-aware policies**: Allow/deny based on DNS names
+
+**Why eBPF is More Secure:**
+- Bypasses iptables (reduces attack surface)
+- Kernel-enforced policies (harder to bypass)
+- Better visibility (Hubble network observability)
+
+### NetworkPolicy Example
+
+**Restrict database access:**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metabase-allow-only
+  namespace: metabase
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: metabase
+      ports:
+        - protocol: TCP
+          port: 5432
+```
+
+**Default deny all:**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+```
+
+## Layer 3: Ingress Security
+
+### TLS Certificate Management
+
+**Let's Encrypt (Public Domains):**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@zengarden.space
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - dns01:
+          cloudflare:
+            email: admin@zengarden.space
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+```
+
+**Internal CA (Internal Domains):**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca
+spec:
+  ca:
+    secretName: internal-ca-key-pair
+```
+
+**TLS Version Enforcement:**
+- Minimum TLS version: 1.2
+- Recommended: TLS 1.3 only
+- Cipher suites: ECDHE-based (forward secrecy)
+
+### ModSecurity WAF (External Ingress)
+
+**Configuration:**
+```yaml
+ingress-nginx-external:
+  controller:
+    config:
+      enable-modsecurity: "true"
+      enable-owasp-modsecurity-crs: "true"
+      modsecurity-snippet: |
+        SecRuleEngine On
+        SecRequestBodyAccess On
+        SecAuditLog /dev/stdout
+        SecAuditLogFormat JSON
+```
+
+**OWASP Core Rule Set (CRS):**
+- SQL injection protection
+- XSS protection
+- Remote code execution protection
+- Local file inclusion protection
+- Protocol attack protection
+
+### Rate Limiting
+
+**Nginx rate limiting:**
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/limit-rps: "10"
+  nginx.ingress.kubernetes.io/limit-connections: "5"
+```
+
+## Layer 4: Network Policies
+
+### Namespace Isolation
+
+**Policy**: Each namespace is isolated by default
+
+```yaml
+# Deny all ingress by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ .Namespace }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+# Allow ingress from same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: {{ .Namespace }}
+spec:
+  podSelector: {}
+  ingress:
+    - from:
+        - podSelector: {}
+```
+
+### Pod-to-Pod Restrictions
+
+**Example: Allow only ingress controller to backend:**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-backend
+  namespace: app
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+## Layer 5: Pod Security
+
+### Pod Security Admission (PSA)
+
+**Enforcement Level**: Restricted (most strict)
+
+**K3s Configuration:**
+```yaml
+kube-apiserver-arg:
+  - "enable-admission-plugins=NodeRestriction,PodSecurity"
+  - "admission-control-config-file=/var/lib/rancher/k3s/server/psa.yaml"
+```
+
+**PSA Policy:**
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: AdmissionConfiguration
+plugins:
+  - name: PodSecurity
+    configuration:
+      apiVersion: pod-security.admission.config.k8s.io/v1
+      kind: PodSecurityConfiguration
+      defaults:
+        enforce: "restricted"
+        enforce-version: "latest"
+        audit: "restricted"
+        audit-version: "latest"
+        warn: "restricted"
+        warn-version: "latest"
+      exemptions:
+        usernames: []
+        runtimeClasses: []
+        namespaces:
+          - kube-system
+          - rook-ceph
+          - velero
+          - metallb-system
+          - victoria-metrics
+          - gitea
+```
+
+**Restricted Policy Requirements:**
+- ✅ Run as non-root user
+- ✅ Drop ALL capabilities
+- ✅ No privilege escalation
+- ✅ Read-only root filesystem (where possible)
+- ✅ Seccomp profile (RuntimeDefault or Localhost)
+- ✅ AppArmor profile
+- ❌ No host namespaces (PID, IPC, network)
+- ❌ No host ports
+- ❌ No host paths
+
+**Example Pod Security Context:**
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containers:
+  - name: app
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: true
+```
+
+### RBAC (Role-Based Access Control)
+
+**Google OIDC Integration:**
+```yaml
+kube-apiserver-arg:
+  - "oidc-issuer-url=https://accounts.google.com"
+  - "oidc-client-id=<google-client-id>.apps.googleusercontent.com"
+  - "oidc-username-claim=email"
+  - "oidc-groups-claim=groups"
+```
+
+**Admin RBAC:**
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: google-admin
+subjects:
+  - kind: User
+    name: oleksiy.pylypenko@gmail.com
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**Read-only RBAC (default):**
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: google-readonly
+subjects:
+  - kind: Group
+    name: system:authenticated
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Secrets Encryption at Rest
+
+**K3s secrets encryption:**
+```yaml
+secrets-encryption: true
+```
+
+**Encryption Configuration:**
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+      - secrets
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: <base64-encoded-32-byte-key>
+      - identity: {}
+```
+
+**Key Rotation**: Manual process via K3s restart with new key
+
+## Layer 6: Application Security
+
+### Container Security
+
+**Non-root Containers:**
+```dockerfile
+# Dockerfile best practice
+FROM alpine:3.19
+RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
+USER app
+```
+
+**Read-only Root Filesystem:**
+```yaml
+securityContext:
+  readOnlyRootFilesystem: true
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: cache
+    mountPath: /app/cache
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir: {}
+```
+
+**Capability Dropping:**
+```yaml
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE  # Only if needed for ports <1024
+```
+
+### Systemd Hardening (Restrictive Proxy)
+
+**Service File:**
+```ini
+[Service]
+# Run as unprivileged user
+User=restrictive-proxy
+Group=restrictive-proxy
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/restrictive-proxy
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+```
+
+## Secrets Management
+
+### DerivedSecrets Operator
+
+**Security Benefits:**
+- **Single master secret**: Reduces secret sprawl
+- **Deterministic derivation**: Same input → same output (reproducible)
+- **Argon2id KDF**: OWASP-recommended, resistant to GPU cracking
+- **Namespace isolation**: Each secret derived with unique context
+
+**Argon2 Parameters:**
+```bash
+argon2 <master-password> -id \
+  -t 4 \              # Iterations (time cost)
+  -m 16 \             # Memory cost (2^16 = 64MB)
+  -p 1 \              # Parallelism
+  -l 32 \             # Output length (32 bytes)
+  -s <salt>           # Salt = namespace/name/field
+```
+
+**Why Argon2id:**
+- OWASP recommended for password hashing
+- Resistant to GPU/ASIC attacks
+- Configurable time/memory trade-offs
+- Side-channel attack resistant
+
+### External Secrets Operator
+
+**Least Privilege Access:**
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: argocd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: external-secrets-reader
+  namespace: integrations
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["argocd"]  # Only specific secrets
+    verbs: ["get"]
+```
+
+## Credential Blast Radius Mitigation
+
+### Restrictive HTTP Proxy
+
+**Problem**: MikroTik admin credentials needed for DNS sync, but full admin access is risky
+
+**Solution**: HTTP proxy with path-based restrictions
+
+**Allowed Paths:**
+```yaml
+restrictions:
+  GET:
+    - "/rest/ip/dns/static**"      # Read DNS records
+    - "/rest/system/resource"      # System status
+  POST:
+    - "/rest/ip/dns/static"        # Create DNS records
+  PUT:
+    - "/rest/ip/dns/static/*"      # Update DNS records
+  PATCH:
+    - "/rest/ip/dns/static/*"      # Modify DNS records
+  DELETE:
+    - "/rest/ip/dns/static/*"      # Delete DNS records
+```
+
+**Blocked Paths:**
+- `/rest/system/user**` (user management)
+- `/rest/ip/firewall**` (firewall rules)
+- `/rest/interface**` (network interfaces)
+- Everything else (default deny)
+
+**Result**: Even if proxy credentials leak, attacker can only modify DNS records
+
+## Layer 7: Audit & Monitoring
+
+### Kubernetes Audit Logging
+
+**Audit Policy:**
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log metadata for all requests
+  - level: Metadata
+    omitStages:
+      - RequestReceived
+```
+
+**Audit Log Configuration:**
+```yaml
+kube-apiserver-arg:
+  - "audit-log-path=/var/log/kubernetes/audit.log"
+  - "audit-log-maxage=30"         # Retain 30 days
+  - "audit-log-maxbackup=10"      # Keep 10 backups
+  - "audit-log-maxsize=100"       # Rotate at 100MB
+```
+
+**What's Logged:**
+- All API requests (who, what, when)
+- Authentication/authorization decisions
+- Resource creation/modification/deletion
+- Failed access attempts
+
+### Security Event Detection
+
+**AlertManager Rules:**
+```yaml
+groups:
+  - name: security
+    rules:
+      - alert: UnauthorizedAPIAccess
+        expr: apiserver_audit_event_total{verb="create",code="403"} > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of 403 errors (unauthorized access attempts)"
+
+      - alert: PodSecurityViolation
+        expr: apiserver_admission_webhook_rejection_count{name="PodSecurity"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod security admission rejection detected"
+```
+
+### Security Metrics
+
+**Tracked Metrics:**
+- Failed authentication attempts
+- RBAC denials
+- Pod Security Admission violations
+- Network policy drops
+- TLS certificate expiration
+- Secrets access patterns
+
+## Threat Model & Mitigations
+
+| Threat | Mitigation |
+|--------|------------|
+| **Compromised pod** | Network policies limit lateral movement, non-root prevents privilege escalation |
+| **Leaked credentials** | Restrictive proxy limits blast radius, secrets rotation |
+| **Network sniffing** | TLS everywhere, optional WireGuard pod-to-pod encryption |
+| **Malicious container image** | Pod Security Admission prevents dangerous containers, admission controllers |
+| **VLAN hopping** | Properly configured switch (VLAN tagging), firewall rules |
+| **Admin workstation compromise** | VLAN100 isolated (no inbound), VPN instead of direct access |
+| **MikroTik admin leak** | Restrictive proxy limits API access to DNS only |
+| **Secrets in Git** | Never committed (`.gitignore`), external secrets, DerivedSecrets |
+
+## Compliance & Best Practices
+
+### CIS Kubernetes Benchmark
+
+**Implemented Controls:**
+- ✅ RBAC enabled
+- ✅ Secrets encryption
+- ✅ Audit logging
+- ✅ Pod Security Admission
+- ✅ Network policies
+- ✅ TLS for API server
+- ✅ OIDC authentication
+- ✅ Kubelet authentication/authorization
+
+### OWASP Kubernetes Top 10
+
+**Mitigations:**
+1. **K01 - Insecure Workload Configurations**: Pod Security Admission (Restricted)
+2. **K02 - Supply Chain Vulnerabilities**: Trusted registries, image scanning (planned)
+3. **K03 - Overly Permissive RBAC**: Least privilege, OIDC, explicit RBAC
+4. **K04 - Lack of Centralized Policy Enforcement**: PSA, NetworkPolicy, admission controllers
+5. **K05 - Inadequate Logging**: Audit logs, metrics, alerting
+6. **K06 - Broken Authentication**: OIDC, mTLS (service mesh optional)
+7. **K07 - Missing Network Segmentation**: VLANs, NetworkPolicy, firewall
+8. **K08 - Secrets Management**: External Secrets, DerivedSecrets, encryption at rest
+9. **K09 - Misconfigured Cluster**: Hardened K3s, regular updates
+10. **K10 - Outdated Components**: Update strategy, vulnerability scanning
+
+## Security Maintenance
+
+### Regular Tasks
+
+**Monthly:**
+- Review audit logs for suspicious activity
+- Check certificate expiration dates
+- Review RBAC permissions
+- Update security policies
+
+**Quarterly:**
+- Update K3s and components
+- Review firewall rules
+- Test disaster recovery procedures
+- Rotate long-lived credentials
+
+**Annually:**
+- Full security audit
+- Penetration testing (optional)
+- Review and update threat model
+- Update security documentation
+
+### Incident Response Plan
+
+**Detection:**
+- AlertManager notifications
+- Audit log analysis
+- Anomaly detection in metrics
+
+**Response:**
+1. Identify affected components
+2. Isolate compromised resources (NetworkPolicy)
+3. Review audit logs for IOCs
+4. Restore from known-good state (Git)
+5. Rotate credentials
+6. Post-incident review
+
+## Conclusion
+
+This homelab implements **production-grade security** through:
+
+1. **Network segmentation** (VLANs, firewall, VPN)
+2. **Cluster hardening** (PSA, RBAC, secrets encryption)
+3. **Network policies** (Cilium, namespace isolation)
+4. **Ingress security** (TLS, ModSecurity, rate limiting)
+5. **Application hardening** (non-root, capabilities, seccomp)
+6. **Audit logging** (comprehensive activity tracking)
+7. **Secrets management** (DerivedSecrets, External Secrets, blast radius mitigation)
+
+Security is **layered**, **defense-in-depth**, and **continuously monitored**.
+
+## Next Steps
+
+- Review [Deployment Guide](/deployment) to implement these security controls
+- Explore [Operations](/operations) for ongoing security maintenance
+- Understand [Monitoring](/operations/monitoring) for security event detection
+
+---
+
+*Security is not a feature but a fundamental design principle. This homelab demonstrates enterprise-grade security practices on minimal hardware.*

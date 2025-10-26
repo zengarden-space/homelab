@@ -1,0 +1,627 @@
+# Tools & Technology Selection
+
+## Tool Selection Criteria
+
+Every tool in this homelab was chosen based on these criteria:
+
+1. **Production-Grade**: Must be used in enterprise environments
+2. **Open Source**: Prefer FOSS for learning and customization
+3. **Active Community**: Strong community support and documentation
+4. **Resource Efficiency**: Must run on ARM64 with limited RAM
+5. **Learning Value**: Should teach transferable skills
+
+## Infrastructure as Code
+
+### Ansible
+
+**Purpose**: Bare metal automation and OS-level configuration
+
+**Why Ansible:**
+| Criterion | Evaluation |
+|-----------|------------|
+| **Agentless** | ⭐⭐⭐⭐⭐ SSH-based, no agents to manage |
+| **Idempotent** | ⭐⭐⭐⭐ Safe to re-run playbooks |
+| **Learning Curve** | ⭐⭐⭐⭐ YAML-based, human-readable |
+| **Community** | ⭐⭐⭐⭐⭐ Massive ecosystem, roles, modules |
+| **ARM64 Support** | ⭐⭐⭐⭐⭐ Python-based, platform agnostic |
+
+**Alternatives Considered:**
+- **Terraform**: Better for cloud, but overkill for bare metal SSH tasks
+- **SaltStack**: Requires agent installation
+- **Chef/Puppet**: Overly complex for homelab scale
+
+**Use Cases in This Homelab:**
+- Partitioning NVMe drives for local-path
+- Installing and configuring K3s
+- Deploying restrictive HTTP proxy
+- Setting up SSH keys across nodes
+- Configuring systemd services
+
+**Key Ansible Files:**
+```
+ansible/
+├── install-k3s/
+│   ├── install.yaml       # Main K3s installation playbook
+│   ├── hosts.yaml         # Inventory (blade001-005)
+│   └── .env              # Google OIDC credentials
+├── install-restrictive-proxy/
+│   ├── install.yaml       # Proxy deployment playbook
+│   └── server.js          # Node.js proxy implementation
+└── partition-nvme-drives/
+    └── partition.yaml     # NVMe partitioning for etcd + local-path
+```
+
+### Helmfile
+
+**Purpose**: Kubernetes infrastructure orchestration and deployment
+
+**Why Helmfile over Plain Helm:**
+| Feature | Helmfile | Plain Helm |
+|---------|----------|------------|
+| **Multi-release management** | ✅ Single file | ❌ Manual scripting |
+| **Dependency ordering** | ✅ Automatic | ❌ Manual |
+| **Environment management** | ✅ Built-in | ❌ Values files |
+| **Templating** | ✅ Gotemplates | ⚠️ Limited |
+| **Declarative** | ✅ GitOps-friendly | ⚠️ Imperative |
+
+**Why NOT Terraform/Crossplane:**
+- Terraform requires state management (adds complexity)
+- Crossplane heavier than needed for homelab
+- Helmfile simpler, Helm-native, sufficient for this scale
+
+**Architecture:**
+```
+helmfile/
+├── helmfile.yaml              # Root orchestration
+├── integrations.yaml          # Shared credentials
+└── */
+    ├── helmfile.yaml.gotmpl   # Component-specific helmfile
+    ├── env.yaml               # Component environment vars
+    └── charts/                # Custom charts
+```
+
+**Key Features Used:**
+- **Dependency ordering**: `needs: [metallb-system, secrets-system]`
+- **Go templating**: Dynamic values from `.env` files
+- **Namespace management**: Automatic namespace creation
+- **Hook support**: Pre/post-install hooks
+
+## GitOps & Continuous Deployment
+
+### ArgoCD
+
+**Purpose**: Declarative GitOps continuous deployment
+
+**Why ArgoCD:**
+| Feature | Benefit |
+|---------|---------|
+| **Declarative** | Git as single source of truth |
+| **Automatic sync** | Self-healing on configuration drift |
+| **Multi-cluster** | Supports multiple K8s clusters (future) |
+| **RBAC & SSO** | Google OIDC integration |
+| **ApplicationSet** | Automatic app discovery from Git |
+| **UI + CLI** | Great visibility and debugging |
+
+**Alternatives Considered:**
+- **FluxCD**: More Kubernetes-native, but less mature UI
+- **Jenkins X**: Opinionated CI/CD, heavier resource footprint
+- **Spinnaker**: Enterprise-grade but over-engineered for homelab
+
+**Configuration Highlights:**
+```yaml
+argocd:
+  server:
+    config:
+      url: https://argocd.homelab.int.zengarden.space
+      dex.config: |
+        connectors:
+          - type: oidc
+            id: google
+            name: Google
+            config:
+              issuer: https://accounts.google.com
+              clientID: $GOOGLE_CLIENT_ID
+              clientSecret: $GOOGLE_CLIENT_SECRET
+    rbacConfig:
+      policy.csv: |
+        g, oleksiy.pylypenko@gmail.com, role:admin
+        g, role:readonly, role:readonly
+```
+
+**ApplicationSet for Auto-Discovery:**
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: applications
+spec:
+  generators:
+    - git:
+        repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+        revision: main
+        directories:
+          - path: manifests/*
+  template:
+    spec:
+      source:
+        repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{path.basename}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+```
+
+### Gitea
+
+**Purpose**: Self-hosted Git server with CI/CD capabilities
+
+**Why Gitea:**
+| Criterion | Evaluation |
+|-----------|------------|
+| **Lightweight** | ⭐⭐⭐⭐⭐ Single binary, ~50MB RAM |
+| **GitHub-compatible** | ⭐⭐⭐⭐ API compatibility for tooling |
+| **Built-in CI/CD** | ⭐⭐⭐⭐ Gitea Actions (GitHub Actions clone) |
+| **Self-hosted** | ⭐⭐⭐⭐⭐ Full data ownership |
+| **ARM64 Support** | ⭐⭐⭐⭐⭐ Native binaries |
+
+**Alternatives Considered:**
+- **GitLab**: Too resource-intensive (~4GB RAM minimum)
+- **Gogs**: Gitea fork with fewer features
+- **GitHub**: Cloud-hosted (doesn't meet self-hosted goal)
+
+**Integration Flow:**
+```
+GitHub (zengarden-space org)
+    │
+    │ (Bidirectional sync via Gitea Automation chart)
+    ▼
+Gitea (gitea.homelab.int.zengarden.space/zengarden-space/)
+    │
+    │ (Git push event → webhook)
+    ▼
+Gitea Actions (CI/CD pipeline)
+    │
+    │ (Build + test + push to registry)
+    ▼
+manifests repository (gitea.homelab.int.zengarden.space/zengarden-space/manifests)
+    │
+    │ (ArgoCD watches)
+    ▼
+Kubernetes deployment
+```
+
+**Gitea Actions Example:**
+```yaml
+name: Build and Deploy
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build Docker image
+        run: docker build -t gitea.homelab.int.zengarden.space/app:${{ github.sha }} .
+      - name: Push to Gitea registry
+        run: docker push gitea.homelab.int.zengarden.space/app:${{ github.sha }}
+      - name: Update manifests
+        run: |
+          git clone https://gitea.homelab.int.zengarden.space/zengarden-space/manifests
+          cd manifests/app
+          kustomize edit set image app=gitea.homelab.int.zengarden.space/app:${{ github.sha }}
+          git commit -am "Update app to ${{ github.sha }}"
+          git push
+```
+
+## Networking & Ingress
+
+### Cilium (CNI)
+
+**Purpose**: Container Network Interface with eBPF-based networking
+
+**Why Cilium:**
+| Feature | Benefit |
+|---------|---------|
+| **eBPF-based** | Bypasses iptables, ~10-15% better performance |
+| **NetworkPolicy** | Native K8s NetworkPolicy support |
+| **kube-proxy replacement** | eBPF load balancing |
+| **Hubble** | Network observability and flow visualization |
+| **Encryption** | Optional WireGuard pod-to-pod encryption |
+
+**Alternatives Considered:**
+- **Flannel**: Simpler but fewer features (no NetworkPolicy)
+- **Calico**: iptables-based, higher resource usage
+- **Weave**: Deprecated
+
+**Key Configuration:**
+```yaml
+cilium:
+  k8sServiceHost: 192.168.77.170
+  k8sServicePort: 6443
+  kubeProxyReplacement: strict       # Replace kube-proxy with eBPF
+  bpf:
+    masquerade: true
+  hubble:
+    enabled: true
+    ui:
+      enabled: true
+```
+
+### MetalLB
+
+**Purpose**: Load balancer for bare-metal Kubernetes
+
+**Why MetalLB:**
+| Criterion | Evaluation |
+|-----------|------------|
+| **Bare-metal support** | ⭐⭐⭐⭐⭐ Purpose-built for bare metal |
+| **Layer 2 mode** | ⭐⭐⭐⭐⭐ Simple ARP-based (no BGP needed) |
+| **IP pool management** | ⭐⭐⭐⭐ IP address allocation |
+| **LoadBalancer services** | ⭐⭐⭐⭐⭐ Native K8s LoadBalancer type |
+
+**Alternatives:**
+- **K3s ServiceLB**: Limited to single IP per service
+- **Kube-VIP**: More complex setup
+- **External load balancer**: Requires additional hardware
+
+**Configuration:**
+```yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.77.200-192.168.77.254
+```
+
+### ingress-nginx
+
+**Purpose**: HTTP(S) ingress controller
+
+**Why ingress-nginx:**
+| Feature | Benefit |
+|---------|---------|
+| **Mature** | ⭐⭐⭐⭐⭐ Production-proven |
+| **Performance** | ⭐⭐⭐⭐ Nginx-based |
+| **Features** | ⭐⭐⭐⭐ WebSocket, TCP/UDP, ModSecurity |
+| **Community** | ⭐⭐⭐⭐⭐ CNCF project |
+
+**Dual Ingress Strategy:**
+1. **Internal ingress** (class: `internal`)
+   - MetalLB IP: 192.168.77.200
+   - Used for: Gitea, ArgoCD, Grafana, Metabase
+   - No ModSecurity (trusted internal network)
+
+2. **External ingress** (class: `external`)
+   - Cloudflare Tunnel backend
+   - Used for: Public-facing services
+   - ModSecurity WAF enabled
+
+### cert-manager
+
+**Purpose**: Automated TLS certificate management
+
+**Why cert-manager:**
+- **ACME support**: Let's Encrypt integration
+- **DNS-01 challenge**: Cloudflare DNS validation
+- **Internal CA**: Custom CA for internal domains
+- **Automatic renewal**: No manual certificate management
+- **CRD-based**: Kubernetes-native
+
+**Configuration:**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@zengarden.space
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - dns01:
+          cloudflare:
+            email: admin@zengarden.space
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+```
+
+### external-dns
+
+**Purpose**: Automatic DNS record synchronization
+
+**Why external-dns:**
+- Watches Ingress/Service resources
+- Creates DNS records automatically
+- Supports multiple providers (Cloudflare, MikroTik via webhook)
+- Eliminates manual DNS management
+
+**MikroTik Integration (via webhook):**
+```yaml
+external-dns:
+  provider:
+    name: webhook
+    webhook:
+      image: ghcr.io/mirceanton/external-dns-provider-mikrotik:v1.4.4
+      env:
+        MIKROTIK_BASEURL: http://mikrotik-proxy.homelab.int.zengarden.space
+        MIKROTIK_SKIP_TLS_VERIFY: "true"
+  sources:
+    - ingress
+    - service
+  domainFilters:
+    - homelab.int.zengarden.space
+```
+
+## Secrets Management
+
+### External Secrets Operator (ESO)
+
+**Purpose**: Synchronize external secrets into Kubernetes
+
+**Why ESO:**
+- Fetches secrets from external sources (Kubernetes secrets in `integrations` namespace)
+- Creates Kubernetes Secrets in target namespaces
+- Centralized credential management
+- Supports secret rotation
+
+**Configuration:**
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: integrations
+  namespace: argocd
+spec:
+  provider:
+    kubernetes:
+      server:
+        url: "https://kubernetes.default.svc"
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: external-secrets
+      remoteNamespace: integrations
+```
+
+### DerivedSecrets Operator (Custom)
+
+**Purpose**: Derive deterministic passwords from a master key using Argon2id
+
+**Why Custom Operator:**
+- **Security**: Single master password derives all component passwords
+- **Deterministic**: Same input always produces same output
+- **Cryptographically secure**: Argon2id is OWASP-recommended KDF
+- **Namespace isolation**: Each component gets unique derived secrets
+
+**How It Works:**
+```
+Master Password (stored in derived-secret-operator namespace)
+    │
+    │ Argon2id(password, salt=context, iterations=4, memory=65536)
+    ▼
+DerivedSecret CRD:
+  spec:
+    password: 32      # Generate 32-character password
+    apiToken: 48      # Generate 48-character API token
+    │
+    ▼
+Kubernetes Secret:
+  data:
+    password: <base64-encoded derived password>
+    apiToken: <base64-encoded derived token>
+```
+
+**CRD Example:**
+```yaml
+apiVersion: zengarden.space/v1
+kind: DerivedSecret
+metadata:
+  name: gitea-admin
+  namespace: gitea
+spec:
+  password: 32
+  apiToken: 48
+```
+
+**Alternatives Considered:**
+- **Sealed Secrets**: Encrypted secrets in Git (not deterministic, complex key management)
+- **HashiCorp Vault**: Over-engineered for homelab, resource intensive
+- **SOPS**: Good for GitOps but manual encryption/decryption
+
+## Monitoring & Observability
+
+### Victoria Metrics
+
+**Purpose**: Metrics collection, storage, and querying
+
+**Why Victoria Metrics over Prometheus:**
+| Feature | Victoria Metrics | Prometheus |
+|---------|------------------|------------|
+| **Resource usage** | ⭐⭐⭐⭐⭐ 50% less RAM | ⭐⭐⭐ |
+| **Storage efficiency** | ⭐⭐⭐⭐⭐ 7× compression | ⭐⭐⭐ |
+| **PromQL compatibility** | ⭐⭐⭐⭐⭐ 100% compatible | ⭐⭐⭐⭐⭐ Native |
+| **High availability** | ⭐⭐⭐⭐ Built-in clustering | ⭐⭐⭐ Requires federation |
+| **Performance** | ⭐⭐⭐⭐⭐ Faster queries | ⭐⭐⭐⭐ |
+
+**Components:**
+- **vmagent**: Metrics collection (Prometheus scraping)
+- **vmstorage**: Time-series storage
+- **vmselect**: Query engine
+- **vmalert**: Alerting rules
+- **vmauth**: Authentication proxy
+
+### Grafana
+
+**Purpose**: Metrics visualization and dashboards
+
+**Why Grafana:**
+- Industry standard for metrics dashboards
+- Prometheus/VictoriaMetrics data source support
+- Alerting integration
+- Template variables and dynamic dashboards
+- OIDC authentication support
+
+**Dashboards:**
+- Node Exporter (system metrics)
+- Kubernetes cluster metrics
+- local-path storage metrics
+- Application-specific dashboards
+
+### AlertManager + Gotify
+
+**Purpose**: Alert routing and push notifications
+
+**Why This Stack:**
+- **AlertManager**: Industry-standard alert routing
+- **Gotify**: Self-hosted push notifications (vs. cloud services)
+- **alertmanager-gotify-nodejs**: Custom webhook bridge
+
+**Alert Flow:**
+```
+vmalert (evaluates rules)
+    │
+    ▼
+AlertManager (routes, deduplicates, groups)
+    │
+    ▼
+alertmanager-gotify-nodejs (webhook → Gotify API)
+    │
+    ▼
+Gotify (push notifications to mobile/web)
+```
+
+## Database
+
+### CloudNativePG (CNPG)
+
+**Purpose**: PostgreSQL operator for Kubernetes
+
+**Why CNPG:**
+| Feature | Benefit |
+|---------|---------|
+| **Native operator** | ⭐⭐⭐⭐⭐ True Kubernetes operator |
+| **HA clustering** | ⭐⭐⭐⭐ Automatic failover |
+| **Backup/restore** | ⭐⭐⭐⭐ Built-in backup to S3/PVC |
+| **Connection pooling** | ⭐⭐⭐⭐ PgBouncer integration |
+| **Monitoring** | ⭐⭐⭐⭐ Prometheus metrics |
+
+**Alternatives Considered:**
+- **Zalando Postgres Operator**: More complex, less actively maintained
+- **Crunchy Data**: Enterprise-focused, heavier
+- **Manual StatefulSet**: No HA, manual management
+
+### Metabase
+
+**Purpose**: Data analytics and visualization
+
+**Why Metabase:**
+- Self-hosted alternative to cloud BI tools
+- Automatic CNPG database discovery (custom operator)
+- SQL + visual query builder
+- User-friendly for non-technical users
+- Low resource footprint
+
+## Custom Tooling
+
+### Restrictive HTTP Proxy (Node.js)
+
+**Purpose**: Limit MikroTik API access to specific paths
+
+**Why Custom:**
+- **Security**: Credential blast radius mitigation
+- **Path restrictions**: Only allow DNS API calls (`/rest/ip/dns/static**`)
+- **Watch mode**: Log-only mode for testing
+- **Simplicity**: 200 lines of Node.js
+
+**Implementation:**
+```javascript
+// Path matching with glob patterns
+const isPathAllowed = (method, path) => {
+  const restrictions = config.restrictions;
+  const patterns = restrictions[method] || [];
+  return patterns.some(pattern => minimatch(path, pattern));
+};
+```
+
+### Gitea Automation (Playwright + Bash)
+
+**Purpose**: Automate OAuth setup and GitHub synchronization
+
+**Components:**
+1. **OAuth Setup Job** (Playwright):
+   - Automates browser interaction with Gitea UI
+   - Configures Google OAuth provider
+   - Retries until successful (60 attempts × 10s)
+
+2. **Sync Job** (Bash + curl):
+   - Creates organization
+   - Generates personal access tokens
+   - Syncs repositories bidirectionally (GitHub ↔ Gitea)
+   - Sets up push mirrors (Gitea → GitHub, 8h interval)
+   - Creates ArgoCD webhook
+
+### Metabase CNPG Operator (Shell-Operator)
+
+**Purpose**: Auto-register CNPG databases in Metabase
+
+**Why Custom:**
+- Eliminates manual database addition in Metabase UI
+- Watches `databases.postgresql.cnpg.io` CRDs
+- Creates Metabase connections via API
+- Enables auto-sync and caching
+
+**Hook Configuration:**
+```yaml
+configVersion: v1
+kubernetes:
+  - apiVersion: databases.postgresql.cnpg.io/v1
+    kind: Database
+    executeHookOnEvent: [Added, Modified]
+    jqFilter: .metadata.name
+```
+
+## Summary of Tool Choices
+
+| Category | Tool | Key Reason |
+|----------|------|------------|
+| **Bare Metal IaC** | Ansible | Agentless, idempotent, simple YAML |
+| **K8s IaC** | Helmfile | Multi-release management, dependencies |
+| **K8s Distribution** | K3s | Lightweight, ARM64-optimized, batteries included |
+| **CNI** | Cilium | eBPF performance, NetworkPolicy, Hubble |
+| **Storage** | K3s local-path | Distributed, replicated, mature |
+| **Load Balancer** | MetalLB | Bare-metal support, simple layer-2 mode |
+| **Ingress** | ingress-nginx | Mature, feature-rich, ModSecurity support |
+| **Certificates** | cert-manager | ACME automation, internal CA |
+| **DNS** | external-dns | Automatic record sync, multi-provider |
+| **GitOps** | ArgoCD | ApplicationSet, auto-discovery, SSO |
+| **Git Server** | Gitea | Lightweight, GitHub-compatible, Actions |
+| **Secrets** | ESO + DerivedSecrets | External integration + deterministic derivation |
+| **Metrics** | Victoria Metrics | Resource-efficient, PromQL-compatible |
+| **Dashboards** | Grafana | Industry standard, flexible |
+| **Database** | CloudNativePG | Native operator, HA, backups |
+| **Analytics** | Metabase | Self-hosted, user-friendly BI |
+
+## Next Steps
+
+- Review [Security](/introduction/security) to understand how these tools are hardened
+- Proceed to [Deployment](/deployment) for step-by-step installation
+- Explore [Operations](/operations) for ongoing management
+
+---
+
+*Tool selection prioritizes production-grade capabilities, resource efficiency, and learning value to create a sustainable platform engineering environment.*

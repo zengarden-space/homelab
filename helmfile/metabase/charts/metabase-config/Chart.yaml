@@ -1,4 +1,4 @@
 apiVersion: v2
-name: metabase-derived-secrets
+name: metabase-config
 description: Derived secrets for Metabase
 version: 1.0.0

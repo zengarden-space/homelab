@@ -2,113 +2,95 @@ import Image from 'next/image'
 
 # Homelab
 
-## Kubernetes Infrastructure at Home
+## Production-Grade Kubernetes at Home
 
-Welcome to the technical documentation for my homelab platform designed to showcase modern platform engineering practices. This environment demonstrates how to build, secure, and operate a production-ready Kubernetes cluster on minimal hardware with maximum automation.
-<Image src="/images/homelab-arch.svg" alt="Architecture Overview"  width={800} height={500}/>
+Welcome to the technical documentation for a modern homelab platform that demonstrates enterprise-grade platform engineering practices on minimal hardware. This environment showcases how to build, secure, and operate a resilient Kubernetes cluster optimized for 24/7 operation with minimal energy consumption.
 
-## Key Highlights
+## Platform Overview
 
-### Infrastructure at Scale
-- **5-node Kubernetes cluster** running on Raspberry Pi Compute Module 5
-- **Multi-master HA setup** with distributed etcd
-- **28-40W total power consumption** - energy-efficient 24/7 operation
-- **NVMe-backed persistent storage** for production workloads
+This homelab is a **production-ready, security-hardened Kubernetes platform** running on ARM hardware with:
 
-### Security-First Design
-- **Hardened K3s** with Pod Security Admissions (restricted mode)
-- **Cilium CNI** with eBPF-based networking and policies
-- **Google OIDC integration** for enterprise authentication
-- **Network segmentation** with VLAN isolation
-- **Deterministic secret management** using Argon2id KDF
+- **5-node distributed cluster** (Raspberry Pi Compute Module 5)
+- **28-40W total power consumption** - always-on with minimal environmental impact
+- **GitOps-driven automation** - zero manual configuration steps
+- **Enterprise security** - OIDC authentication, VLAN isolation, hardened containers
+- **Complete observability** - metrics, logging, and alerting
 
-### GitOps & Automation
-- **ArgoCD** for declarative application delivery
-- **Gitea** for self-hosted Git with GitHub synchronization
-- **Helmfile** for hierarchical infrastructure-as-code
-- **Custom operators** for secret derivation and database automation
-- **Automated CI/CD** with Gitea Actions
+## Design Principles
 
-### Platform Services
-- **MetalLB** for bare-metal load balancing
-- **External DNS** with MikroTik and Cloudflare integration
-- **Cert-Manager** for automated TLS certificate management
-- **Cloudflare Tunnel** for secure and free public ingress
-- **Victoria Metrics** for comprehensive observability
+This platform embodies key platform engineering principles:
 
-## Architecture Philosophy
+1. **Infrastructure as Code** - Every component from bare metal to applications is declaratively defined
+2. **GitOps-First** - All changes flow through Git with automated validation and deployment
+3. **Security by Default** - Hardened configurations, least privilege, defense in depth
+4. **Deterministic Operations** - Reproducible deployments with zero manual configuration
+5. **Complete Observability** - Comprehensive metrics, logs, audit trails, and alerts
+6. **Modular Architecture** - Loosely coupled components with clear boundaries
+7. **Energy Efficiency** - Optimized for 24/7 operation with minimal power consumption
 
-This homelab embodies several key principles:
 
-1. **Infrastructure as Code** - Everything from bare metal to applications is declaratively defined
-2. **GitOps First** - All changes flow through Git with automated deployment pipelines
-3. **Security by Default** - Hardened configurations, least privilege, and defense in depth
-4. **Deterministic Operations** - Reproducible builds and deployments with no manual steps
-5. **Observable Systems** - Comprehensive metrics, logging, and audit trails
+## Architecture at a Glance
 
-## Quick Navigation
+<Image src="/images/homelab-arch.svg" alt="Homelab Overview" width={1200} height={600} />
 
-### Getting Started
-- [**Philosophy & Vision**](/introduction) - Why build a homelab and design principles
-- [**Hardware Architecture**](/hardware) - CM5 compute blades, NVMe storage, and power efficiency
+## Use Cases
 
-### Core Infrastructure
-- [**Network Design**](/networking) - VLANs, DNS, VPN, and MikroTik configuration
-- [**Infrastructure Automation**](/infrastructure) - Ansible for bare metal, K3s installation, security hardening
+This homelab serves multiple purposes:
 
-### Platform Services
-- [**Core Components**](/core-components) - MetalLB, cert-manager, ingress, external-dns
-- [**Custom Operators**](/automation) - DerivedSecrets, Metabase automation
-
-### Operations
-- [**GitOps Pipeline**](/gitops) - Gitea, ArgoCD, and deployment workflows
-- [**Operations Guide**](/operations) - Common tasks, troubleshooting, monitoring
-
-## Technical Specifications
-
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| **Kubernetes** | K3s | Latest |
-| **CNI** | Cilium | 1.17.4 |
-| **Load Balancer** | MetalLB | 0.14.5 |
-| **Certificate Manager** | cert-manager | 1.18.1 |
-| **GitOps** | ArgoCD | Latest |
-| **Git Server** | Gitea | 12.4.0 |
-| **Metrics** | Victoria Metrics | Latest |
-| **Ingress** | ingress-nginx | Latest |
-| **Database** | CloudNativePG | Latest |
+- **Learning Platform** - Hands-on experience with enterprise platform engineering
+- **Development Environment** - Always-available infrastructure for pet projects
+- **CI/CD Pipeline** - Automated testing and deployment for personal projects
+- **Data Analytics** - PostgreSQL databases with Metabase visualization
+- **Experimentation** - Safe environment to test new technologies
+- **Portfolio Showcase** - Demonstrate platform engineering expertise
 
 ## Repository Structure
 
 ```
 homelab/
-├── ansible/                    # Bare metal automation
-│   ├── partition-nvme-drives/ # NVMe storage setup
-│   ├── install-k3s/           # K3s cluster bootstrap
-│   └── install-restrictive-proxy/  # HTTP proxy for security boundaries
-├── helmfile/                   # Kubernetes infrastructure
-│   ├── helmfile.yaml          # Root orchestration
-│   ├── metallb-system/        # Load balancing
-│   ├── cert-manager/          # TLS certificates
-│   ├── external-dns/          # DNS automation
-│   ├── secrets-system/        # Secret management
-│   ├── argocd/                # GitOps orchestration
-│   ├── gitea/                 # Git server + automation
-│   └── [other components]/
-└── docs/                       # This documentation site
+├── ansible/                       # Day 1: Infrastructure bootstrap
+│   ├── install-k3s/               # K3s cluster installation + hardening
+│   ├── install-restrictive-proxy/ # MikroTik API proxy with path restrictions
+│   ├── partition-nvme-drives/     # NVMe partitioning for local-path
+│   └── setup-ssh-keys/            # SSH key distribution
+├── helmfile/                      # Day 1: Platform deployment
+│   ├── helmfile.yaml              # Root orchestration
+│   ├── metallb-system/            # Load balancer IP ranges
+│   ├── cert-manager/              # TLS certificate management
+│   ├── external-dns/              # DNS automation (MikroTik + Cloudflare)
+│   ├── external-tunnel/           # Cloudflare Tunnel + external ingress
+│   ├── ingress-nginx/             # Internal ingress controller
+│   ├── secrets-system/            # External Secrets + DerivedSecrets operator
+│   ├── argocd/                    # GitOps controller + config
+│   ├── gitea/                     # Git server + automation + runner
+│   ├── cnpg-system/               # CloudNativePG operator
+│   ├── metabase/                  # Analytics + CNPG auto-discovery operator
+│   └── victoria-metrics/          # Monitoring stack + alerting
+├── integrations.yaml.template     # External service credentials
+└── docs/                          # This documentation site
 ```
 
-## Contact & Collaboration
+## Getting Started
+
+Ready to explore or deploy this platform?
+
+1. **Understand the Design** - Start with [Introduction](/introduction) to understand the design decisions and architecture
+2. **Plan Your Infrastructure** - Review [Infrastructure Planning](/introduction/infrastructure-planning) for hardware requirements
+3. **Deploy** - Follow the [Deployment Guide](/deployment) step-by-step
+4. **Operate** - Learn maintenance and monitoring in [Operations](/operations)
+
+## Community & Collaboration
 
 This homelab is designed to be:
-- **Educational** - Learn platform engineering practices
-- **Reproducible** - Clone and adapt for your own use
-- **Collaborative** - VPN access available for approved contributors
 
-For questions or collaboration opportunities, reach out via:
-- **GitHub**: [zengarden-space](https://github.com/zengarden-space/)
-- **Gitea**: [gitea.homelab.int.zengarden.space](https://gitea.homelab.int.zengarden.space/zengarden-space/)
+- **Educational** - Learn modern platform engineering practices
+- **Reproducible** - Fork and adapt for your own infrastructure
+- **Open** - All code available at [GitHub/zengarden-space](https://github.com/zengarden-space/)
+
+For collaboration:
+- **Internal Git**: [gitea.homelab.int.zengarden.space](https://gitea.homelab.int.zengarden.space/zengarden-space/)
+- **VPN Access**: Available for approved contributors
 
 ---
 
-*This documentation showcases production-grade platform engineering principles applied to a cost-effective, energy-efficient homelab environment.*
+*This documentation showcases production-grade platform engineering principles applied to a cost-effective, energy-efficient homelab environment. Built by Oleksii Pylypenko as a learning platform.*

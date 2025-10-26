@@ -1,0 +1,636 @@
+# Infrastructure Deployment
+
+## Step-by-Step Infrastructure Setup
+
+This guide walks through deploying the bare metal infrastructure, from Raspberry Pi OS installation to a running K3s cluster.
+
+## Prerequisites
+
+### Hardware Setup
+- 5× Raspberry Pi CM5 blades (8GB RAM) installed in chassis
+- 5× NVMe SSDs (M.2 2242) installed in blades
+- MikroTik router connected to internet
+- Network switch connected to MikroTik
+- All blades connected to switch (or direct to MikroTik)
+
+### Management Workstation
+- Ansible 2.9+ installed
+- kubectl 1.28+ installed
+- SSH client
+- Network access to VLAN77 (192.168.77.0/24)
+
+## Step 1: Raspberry Pi OS Bootstrap
+
+### 1.1 Download Ubuntu Server 24.04 LTS ARM64
+
+```bash
+# Download official Ubuntu Server image
+wget https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-preinstalled-server-arm64+raspi.img.xz
+
+# Verify checksum (optional)
+wget https://cdimage.ubuntu.com/releases/24.04/release/SHA256SUMS
+sha256sum -c SHA256SUMS 2>&1 | grep OK
+```
+
+### 1.2 Flash SD Card (for initial boot)
+
+```bash
+# Extract image
+xz -d ubuntu-24.04-preinstalled-server-arm64+raspi.img.xz
+
+# Flash to SD card (replace /dev/sdX with your SD card device)
+sudo dd if=ubuntu-24.04-preinstalled-server-arm64+raspi.img of=/dev/sdX bs=4M status=progress conv=fsync
+
+# Mount and configure cloud-init (optional: set hostname, SSH keys)
+# Mount the writable partition
+sudo mount /dev/sdX2 /mnt
+sudo nano /mnt/etc/cloud/cloud.cfg.d/99-custom.cfg
+```
+
+**Custom cloud-init config (99-custom.cfg):**
+```yaml
+#cloud-config
+hostname: blade001
+fqdn: blade001.homelab.int.zengarden.space
+manage_etc_hosts: true
+
+users:
+  - name: ubuntu
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3... your-public-key
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+
+# Disable password authentication
+ssh_pwauth: false
+```
+
+### 1.3 First Boot and Initial Setup
+
+**Repeat for each blade (blade001-blade005):**
+
+1. Insert SD card into CM5
+2. Power on blade
+3. Wait ~2-3 minutes for boot
+4. SSH into blade using default credentials or SSH key
+
+```bash
+# Default credentials (if no cloud-init):
+# username: ubuntu
+# password: ubuntu (change on first login)
+
+ssh ubuntu@<blade-ip>
+
+# Change hostname (if not set via cloud-init)
+sudo hostnamectl set-hostname blade001
+
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y python3 python3-pip curl wget vim
+
+# Set static IP (edit netplan)
+sudo nano /etc/netplan/50-cloud-init.yaml
+```
+
+**Netplan configuration (50-cloud-init.yaml):**
+```yaml
+network:
+  version: 2
+  ethernets:
+    eth0:
+      addresses:
+        - 192.168.77.170/24  # blade001
+      gateway4: 192.168.77.1
+      nameservers:
+        addresses:
+          - 192.168.77.1
+          - 8.8.8.8
+      dhcp4: false
+```
+
+**IP Address Assignment:**
+- blade001: 192.168.77.170
+- blade002: 192.168.77.171
+- blade003: 192.168.77.172
+- blade004: 192.168.77.173
+- blade005: 192.168.77.174
+
+```bash
+# Apply netplan changes
+sudo netplan apply
+
+# Reboot to ensure all changes take effect
+sudo reboot
+```
+
+## Step 2: MikroTik Router Configuration
+
+### 2.1 Connect to MikroTik WebUI or CLI
+
+```bash
+# SSH to MikroTik
+ssh admin@192.168.88.1
+# Default password: <empty> or <admin>
+```
+
+### 2.2 Configure VLANs
+
+**Create VLAN interfaces:**
+```routeros
+# VLAN77 (K3s Cluster)
+/interface vlan
+add interface=eth2 name=vlan77 vlan-id=77
+
+# VLAN88 (Home)
+/interface vlan
+add interface=eth4 name=vlan88 vlan-id=88
+
+# VLAN100 (Management)
+/interface vlan
+add interface=eth5 name=vlan100 vlan-id=100
+```
+
+### 2.3 Configure IP Addresses
+
+```routeros
+/ip address
+add address=192.168.77.1/24 interface=vlan77
+add address=192.168.88.1/24 interface=vlan88
+add address=192.168.100.1/24 interface=vlan100
+```
+
+### 2.4 Configure DHCP (optional, we use static IPs)
+
+```routeros
+# DHCP for VLAN77 (optional, for dynamic nodes)
+/ip pool
+add name=pool-vlan77 ranges=192.168.77.50-192.168.77.100
+
+/ip dhcp-server
+add address-pool=pool-vlan77 interface=vlan77 name=dhcp-vlan77
+
+/ip dhcp-server network
+add address=192.168.77.0/24 gateway=192.168.77.1 dns-server=192.168.77.1
+```
+
+### 2.5 Configure DNS
+
+```routeros
+/ip dns
+set servers=8.8.8.8,1.1.1.1
+set allow-remote-requests=yes
+
+# Add static DNS entries for blades
+/ip dns static
+add name=blade001.homelab.int.zengarden.space address=192.168.77.170
+add name=blade002.homelab.int.zengarden.space address=192.168.77.171
+add name=blade003.homelab.int.zengarden.space address=192.168.77.172
+add name=blade004.homelab.int.zengarden.space address=192.168.77.173
+add name=blade005.homelab.int.zengarden.space address=192.168.77.174
+```
+
+### 2.6 Configure Firewall
+
+**Refer to [Security documentation](/introduction/security#layer-1-network-segmentation) for complete firewall rules.**
+
+**Basic rules:**
+```routeros
+# Allow established/related
+/ip firewall filter
+add action=accept chain=forward connection-state=established,related
+
+# Allow VLAN100 (management) to all
+add action=accept chain=forward src-address=192.168.100.0/24
+
+# Allow VLAN88 (home) to VLAN77 ports 80,443
+add action=accept chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24 protocol=tcp dst-port=80,443
+
+# Block VLAN88 to VLAN77 (other ports)
+add action=drop chain=forward src-address=192.168.88.0/24 dst-address=192.168.77.0/24
+
+# Block all to VLAN100 (management isolation)
+add action=drop chain=forward dst-address=192.168.100.0/24
+
+# Allow VLAN77 to internet
+add action=accept chain=forward src-address=192.168.77.0/24 out-interface=eth1
+
+# Default drop
+add action=drop chain=forward
+```
+
+### 2.7 Configure NAT
+
+```routeros
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=eth1
+```
+
+## Step 3: Google OAuth Credentials
+
+### 3.1 Create Google Cloud Project
+
+1. Navigate to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create new project: "homelab-k3s"
+3. Enable **Google+ API** (for OIDC)
+
+### 3.2 Create OAuth 2.0 Client ID
+
+1. Navigate to **APIs & Services > Credentials**
+2. Click **Create Credentials > OAuth 2.0 Client ID**
+3. Application type: **Web application**
+4. Name: "K3s OIDC"
+5. Authorized redirect URIs:
+   - `http://localhost:8000`
+   - `http://localhost:18000`
+
+6. Click **Create**
+7. Save **Client ID** and **Client Secret**
+
+### 3.3 Store Credentials
+
+**Create `.env` file for Ansible:**
+
+```bash
+cd ../ansible/install-k3s
+cp .env.template .env
+nano .env
+```
+
+**.env file:**
+```bash
+# Google OIDC Credentials
+GOOGLE_CLIENT_ID="<your-client-id>.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="<your-client-secret>"
+GOOGLE_ADMIN_EMAIL="your-email@gmail.com"
+```
+
+## Step 4: SSH Key Distribution
+
+### 4.1 Generate SSH Key (if not exists)
+
+```bash
+ssh-keygen -t ed25519 -C "homelab-admin"
+# Save to: ~/.ssh/id_ed25519_homelab
+```
+
+### 4.2 Copy SSH Key to All Blades
+
+```bash
+# Copy public key to each blade
+for i in {11..15}; do
+  ssh-copy-id -i ~/.ssh/id_ed25519_homelab.pub ubuntu@192.168.77.$i
+done
+
+# Test SSH access (should not prompt for password)
+ssh -i ~/.ssh/id_ed25519_homelab ubuntu@192.168.77.170
+```
+
+### 4.3 Run Ansible Playbook (Optional)
+
+**Alternatively, use Ansible playbook:**
+
+```bash
+cd ../ansible/setup-ssh-keys
+ansible-playbook -i ../install-k3s/hosts.yaml setup.yaml
+```
+
+## Step 5: NVMe Drive Setup
+
+### 5.1 Verify NVMe Drives
+
+**SSH to each blade and check NVMe:**
+
+```bash
+ssh ubuntu@192.168.77.170
+lsblk
+```
+
+**Expected output:**
+```
+NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
+nvme0n1     259:0    0 238.5G  0 disk
+```
+
+### 5.2 Format and Mount NVMe
+
+**The NVMe drive should be formatted and mounted at `/var/lib/rancher/k3s`:**
+
+```bash
+# Format NVMe drive (if not already formatted)
+sudo mkfs.ext4 /dev/nvme0n1
+
+# Create mount point
+sudo mkdir -p /var/lib/rancher/k3s
+
+# Add to /etc/fstab for persistent mounting
+echo "/dev/nvme0n1 /var/lib/rancher/k3s ext4 defaults 0 0" | sudo tee -a /etc/fstab
+
+# Mount
+sudo mount -a
+
+# Verify
+df -h | grep nvme
+```
+
+**Expected output:**
+```
+/dev/nvme0n1    234G   15G  208G   7% /var/lib/rancher/k3s
+```
+
+**Note:** K3s will use this mount for:
+- etcd data (`/var/lib/rancher/k3s/server/db`)
+- Containerd data (`/var/lib/rancher/k3s/agent/containerd`)
+- local-path PVCs (`/var/lib/rancher/k3s/storage`)
+
+## Step 6: K3s Cluster Installation
+
+### 6.1 Configure Ansible Inventory
+
+**Edit `hosts.yaml`:**
+
+```bash
+cd ../ansible/install-k3s
+nano hosts.yaml
+```
+
+**hosts.yaml:**
+```yaml
+all:
+  children:
+    k3s_cluster:
+      children:
+        masters:
+          hosts:
+            blade001:
+              ansible_host: 192.168.77.170
+            blade002:
+              ansible_host: 192.168.77.171
+            blade003:
+              ansible_host: 192.168.77.172
+        workers:
+          hosts:
+            blade004:
+              ansible_host: 192.168.77.173
+            blade005:
+              ansible_host: 192.168.77.174
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519_homelab
+    k3s_version: v1.32.4+k3s1
+```
+
+### 6.2 Review Ansible Playbook
+
+**Key configuration in `install.yaml`:**
+- K3s version: v1.32.4+k3s1
+- CNI: Cilium (flannel disabled)
+- Pod Security Admission: Restricted
+- Secrets encryption: Enabled
+- OIDC: Google integration
+- Audit logging: Enabled
+
+### 6.3 Run K3s Installation Playbook
+
+```bash
+# Dry run (check what will be done)
+ansible-playbook -i hosts.yaml install.yaml --check
+
+# Actual installation
+ansible-playbook -i hosts.yaml install.yaml
+```
+
+**Installation steps:**
+1. Install K3s on blade001 (master, bootstrap)
+2. Retrieve K3s token from blade001
+3. Install K3s on blade002-003 (masters, join cluster)
+4. Install K3s on blade004-005 (workers, join cluster)
+5. Install Cilium CNI
+6. Configure OIDC for kubectl
+
+**Duration:** ~20-30 minutes
+
+### 6.4 Verify K3s Installation
+
+```bash
+# Copy kubeconfig to management workstation
+scp ubuntu@192.168.77.170:~/.kube/config ~/.kube/config-homelab
+
+# Set KUBECONFIG
+export KUBECONFIG=~/.kube/config-homelab
+
+# Verify nodes
+kubectl get nodes
+```
+
+**Expected output:**
+```
+NAME      STATUS   ROLES                       AGE   VERSION
+blade001  Ready    control-plane,etcd,master   5m    v1.32.4+k3s1
+blade002  Ready    control-plane,etcd,master   4m    v1.32.4+k3s1
+blade003  Ready    control-plane,etcd,master   4m    v1.32.4+k3s1
+blade004  Ready    <none>                      3m    v1.32.4+k3s1
+blade005  Ready    <none>                      3m    v1.32.4+k3s1
+```
+
+**Verify Cilium:**
+```bash
+kubectl -n kube-system get pods -l k8s-app=cilium
+```
+
+**Expected output:**
+```
+NAME           READY   STATUS    RESTARTS   AGE
+cilium-xxxxx   1/1     Running   0          5m
+cilium-yyyyy   1/1     Running   0          5m
+cilium-zzzzz   1/1     Running   0          5m
+cilium-aaaaa   1/1     Running   0          5m
+cilium-bbbbb   1/1     Running   0          5m
+```
+
+### 6.5 Install kubectl-oidc-login Plugin
+
+**For OIDC authentication:**
+
+```bash
+# Install krew (kubectl plugin manager)
+(
+  set -x; cd "$(mktemp -d)" &&
+  OS="$(uname | tr '[:upper:]' '[:lower:]')" &&
+  ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')" &&
+  KREW="krew-${OS}_${ARCH}" &&
+  curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/latest/download/${KREW}.tar.gz" &&
+  tar zxvf "${KREW}.tar.gz" &&
+  ./"${KREW}" install krew
+)
+
+# Add krew to PATH
+export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
+
+# Install oidc-login plugin
+kubectl krew install oidc-login
+```
+
+**Test OIDC authentication:**
+```bash
+# This will open browser for Google login
+kubectl get pods --all-namespaces
+
+# First time: authenticate via browser
+# Subsequent: uses cached tokens
+```
+
+## Step 7: Restrictive HTTP Proxy Deployment
+
+### 7.1 Configure Proxy Settings
+
+```bash
+cd ../ansible/install-restrictive-proxy
+cp .env.template .env
+nano .env
+```
+
+**.env file:**
+```bash
+# MikroTik Admin Credentials
+MIKROTIK_HOST="192.168.77.1"
+MIKROTIK_USERNAME="admin"
+MIKROTIK_PASSWORD="<your-mikrotik-password>"
+
+# Proxy Settings
+PROXY_HOST="0.0.0.0"
+PROXY_PORT="555"
+PROXY_MODE="RESTRICT"  # or "WATCH" for testing
+```
+
+### 7.2 Deploy Proxy via Ansible
+
+```bash
+ansible-playbook -i ../install-k3s/hosts.yaml install.yaml
+```
+
+**What this does:**
+- Installs Node.js on blade001-002
+- Copies `server.js` and config
+- Creates systemd service
+- Starts and enables service
+
+### 7.3 Verify Proxy
+
+```bash
+# SSH to blade001
+ssh ubuntu@192.168.77.170
+
+# Check service status
+sudo systemctl status restrictive-proxy
+
+# Test proxy (should allow DNS queries)
+curl -X GET http://localhost:555/rest/ip/dns/static \
+  -H "Authorization: Basic <base64-encoded-credentials>"
+
+# Test denied path (should return 403)
+curl -X GET http://localhost:555/rest/system/user \
+  -H "Authorization: Basic <base64-encoded-credentials>"
+```
+
+## Post-Installation Verification
+
+### Verify Cluster Health
+
+```bash
+# Check node status
+kubectl get nodes -o wide
+
+# Check system pods
+kubectl get pods --all-namespaces
+
+# Check etcd health
+sudo k3s kubectl -n kube-system exec -it $(kubectl -n kube-system get pod -l component=etcd -o jsonpath='{.items[0].metadata.name}') -- etcdctl endpoint health
+
+# Check Cilium health
+kubectl -n kube-system exec -it $(kubectl -n kube-system get pod -l k8s-app=cilium -o jsonpath='{.items[0].metadata.name}') -- cilium status
+```
+
+### Verify Storage
+
+```bash
+# Check NVMe mounts
+ssh ubuntu@192.168.77.170 df -h | grep nvme
+```
+
+### Verify Network
+
+```bash
+# Ping between nodes
+ssh ubuntu@192.168.77.170 ping -c 3 192.168.77.171
+
+# Ping gateway
+ssh ubuntu@192.168.77.170 ping -c 3 192.168.77.1
+
+# Ping internet
+ssh ubuntu@192.168.77.170 ping -c 3 8.8.8.8
+```
+
+## Troubleshooting
+
+### K3s Installation Fails
+
+**Error: Port 6443 already in use**
+```bash
+# Check what's using port 6443
+sudo netstat -tulpn | grep 6443
+
+# Kill process or remove old K3s installation
+sudo /usr/local/bin/k3s-killall.sh
+sudo /usr/local/bin/k3s-uninstall.sh
+```
+
+**Error: Insufficient disk space**
+```bash
+# Check disk space
+df -h
+
+# Clean up if needed
+sudo apt clean
+sudo apt autoremove
+```
+
+### Cilium Pods Not Running
+
+**Check Cilium installation:**
+```bash
+kubectl -n kube-system get pods -l k8s-app=cilium
+
+# Check logs
+kubectl -n kube-system logs -l k8s-app=cilium --tail=50
+
+# Reinstall Cilium (if needed)
+# Refer to Ansible playbook for correct Cilium helm values
+```
+
+### OIDC Authentication Fails
+
+**Error: OIDC discovery failed**
+```bash
+# Verify Google OAuth credentials
+cat ../ansible/install-k3s/.env
+
+# Check K3s API server logs
+sudo journalctl -u k3s -f | grep oidc
+
+# Verify redirect URIs in Google Cloud Console match:
+# http://localhost:8000
+# http://localhost:18000
+```
+
+## Next Steps
+
+Infrastructure deployed! Continue to:
+
+1. [Core Platform Deployment](/deployment/core-platform) - Deploy Helmfile-based platform services
+2. [Applications Deployment](/deployment/applications) - Set up GitOps workflow
+
+---
+
+*Infrastructure deployment complete. Your K3s cluster is now ready for platform services!*

@@ -83,7 +83,7 @@
               exemptions:
                 usernames: []
                 runtimeClasses: []
-                namespaces: [kube-system, rook-ceph, velero, metallb-system, victoria-metrics, gitea]
+                namespaces: [kube-system, metallb-system, victoria-metrics, gitea]
           - name: EventRateLimit
             configuration:
               apiVersion: eventratelimit.admission.k8s.io/v1alpha1

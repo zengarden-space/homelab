@@ -29,10 +29,10 @@ The chart includes intelligent token management:
 
 ```yaml
 organization:
-  name: "zengarden-space"          # Organization name
-  description: "ZenGarden Space Organization"  # Organization description
-  website: "https://zengarden.space"          # Organization website
-  visibility: "public"                        # public or private
+  name: "zengarden-space"
+  description: "zengarden.space organization"
+  website: "https://github.com/zengarden-space/"         
+  visibility: "public"
 ```
 
 ### Gitea Configuration

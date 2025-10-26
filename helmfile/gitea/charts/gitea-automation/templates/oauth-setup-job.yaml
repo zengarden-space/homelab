@@ -68,7 +68,7 @@ spec:
             node setup-google-oauth.js
         env:
         - name: GITEA_URL
-          value: "https://gitea.homelab.int.zengarden.space"
+          value: "https://gitea.homelab.int.{{ .Values.domain }}"
         - name: GITEA_ADMIN_USERNAME
           value: {{ .Values.gitea.admin.username | quote }}
         - name: GITEA_ADMIN_PASSWORD

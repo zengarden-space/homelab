@@ -35,12 +35,12 @@ spec:
         - name: METABASE_ADMIN_EMAIL
           valueFrom:
             secretKeyRef:
-              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              name: {{ include "metabase-cnpg-operator.fullname" . }}-secrets
               key: admin-email
         - name: METABASE_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "metabase-cnpg-operator.fullname" . }}
+              name: {{ include "metabase-cnpg-operator.fullname" . }}-secrets
               key: admin-password
         - name: LOG_TYPE
           value: "json"

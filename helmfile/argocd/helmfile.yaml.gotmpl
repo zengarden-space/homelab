@@ -10,7 +10,7 @@ releases:
       - createAggregateRoles: true
 
         global:
-          domain: argocd.homelab.int.zengarden.space
+          domain: argocd.homelab.int.{{ .Values.domain }}
 
         redis-ha:
           enabled: true
@@ -29,7 +29,7 @@ releases:
               cert-manager.io/cluster-issuer: letsencrypt-prod
             extraTls:
               - hosts:
-                  - argocd.homelab.int.zengarden.space
+                  - argocd.homelab.int.{{ .Values.domain }}
                 secretName: argocd-tls
 
         repoServer:
@@ -47,7 +47,7 @@ releases:
             server.insecure: true
           cm:
             # Google OAuth configuration
-            url: https://argocd.homelab.int.zengarden.space
+            url: https://argocd.homelab.int.{{ .Values.domain }}
             dex.config: |
               connectors:
                 - type: google
@@ -56,7 +56,7 @@ releases:
                   config:
                     clientID: $argocd-google-oauth:clientId
                     clientSecret: $argocd-google-oauth:clientSecret
-                    redirectURI: https://argocd.homelab.int.zengarden.space/api/dex/callback
+                    redirectURI: https://argocd.homelab.int.{{ .Values.domain }}/api/dex/callback
           rbac:
             policy.default: role:readonly
             policy.csv: |
@@ -68,8 +68,9 @@ releases:
     needs:
       - argocd/argocd
     values:
-      - applicationSet:
+      - domain: {{ .Values.domain }}
+        applicationSet:
           git:
-            repoURL: https://gitea.homelab.int.zengarden.space/zengarden-space/manifests.git
+            repoURL: https://gitea.homelab.int.{{ .Values.domain }}/zengarden-space/manifests.git
             revision: main
             manifestsPath: manifests/*

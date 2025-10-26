@@ -13,6 +13,6 @@ all:
         blade005:
           ansible_host: blade005
   vars:
-    ansible_user: oleksiyp
+    ansible_user: ansible
     ansible_ssh_private_key_file: ~/.ssh/id_ed25519
     ansible_python_interpreter: /usr/bin/python3

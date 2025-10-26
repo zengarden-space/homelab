@@ -1,0 +1,570 @@
+# Architecture Design
+
+## System Architecture Overview
+
+This homelab implements a **multi-layered, security-hardened architecture** designed for resilience, scalability, and operational simplicity. The architecture takes into consideration factors like network isolation, component interactions, failure domains, and security boundaries.
+
+{/* ![Architecture Diagram](/images/architecture-layers.svg) */}
+
+## Architectural Layers
+
+### Layer 1: Physical & Network Infrastructure
+
+**Components:**
+- 5x Raspberry Pi Compute Module 5 (8GB RAM each)
+- NVMe SSDs for storage (etcd + local-path OSDs)
+- MikroTik Router (RouterOS 7) for network management
+- Zyxel 8-port PoE switch
+
+**Network Topology:**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                      Internet (Optical WAN)                    │
+└─────────────────────────────┬──────────────────────────────────┘
+                              │ eth1
+┌─────────────────────────────┴──────────────────────────────────┐
+│                      MikroTik Router (hEX S)                   │
+│                                                                │
+│  Firewall Rules │ VLAN Management │ DNS │ DHCP │ WireGuard     │
+├────────────┬────────────────┬──────────────────┬───────────────┤
+│  VLAN77    │    VLAN88      │    VLAN100       │  WireGuard VPN│
+│  (Cluster) │    (Home)      │   (Management)   │  10.8.0.0/24  │
+│  eth2+eth3 │    eth4        │    eth5          │               │
+└─────┬──────┴────────────────┴──────────────────┴───────────────┘
+      │
+      ├─ Zyxel Switch (PoE) ──┬─ blade001 (192.168.77.170)
+      │                        ├─ blade002 (192.168.77.171)
+      │                        ├─ blade003 (192.168.77.172)
+      │                        └─ blade004 (192.168.77.173)
+      │
+      └─ Direct Connection ──── blade005 (192.168.77.174)
+```
+
+**VLAN Segmentation:**
+
+| VLAN | Network | Purpose | Access Rules |
+|------|---------|---------|--------------|
+| **VLAN77** | 192.168.77.0/24 | K3s cluster nodes | Internet access, isolated from VLAN88, blocked from VLAN100 |
+| **VLAN88** | 192.168.88.0/24 | Home devices (WiFi, laptops) | Internet access, limited K3s service access via MetalLB |
+| **VLAN100** | 192.168.100.0/24 | Management workstation | Full access to all networks, no inbound access allowed |
+| **WireGuard** | 10.8.0.0/24 | VPN clients | Access to VLAN77 + pod/service networks, blocked from VLAN88/100 |
+
+**Firewall Strategy:**
+- Default deny-all with explicit allow rules
+- VLAN100 → All (management access)
+- VLAN88 → VLAN77:80,443 (web services only)
+- WireGuard → VLAN77 + Pod/Service CIDRs
+- VLAN77 → Internet (for updates and external integrations)
+
+### Layer 2: Kubernetes Infrastructure
+
+**K3s Cluster Topology:**
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    K3s Control Plane (HA)              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  blade001    │  │  blade002    │  │  blade003    │  │
+│  │  (Master 1)  │  │  (Master 2)  │  │  (Master 3)  │  │
+│  │              │  │              │  │              │  │
+│  │  etcd member │  │  etcd member │  │  etcd member │  │
+│  │  API Server  │  │  API Server  │  │  API Server  │  │
+│  │  Scheduler   │  │  Scheduler   │  │  Scheduler   │  │
+│  │  Controller  │  │  Controller  │  │  Controller  │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+└────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    Worker Nodes                                  │
+│  ┌────────────────────────────────┐  ┌────────────────────────┐  │
+│  │  blade004 (Worker 1)           │  │  blade005 (Worker 2)   │  │
+│  │  - Application workloads       │  │  - Application loads   │  │
+│  │  - local-path OSD              │  │  - local-path OSD      │  │
+│  └────────────────────────────────┘  └────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Node Roles:**
+- **blade001-003**: Control plane + etcd + worker capabilities + local-path monitors
+- **blade004-005**: Dedicated workers + local-path OSDs
+
+**Kubernetes Configuration:**
+- **Version**: K3s v1.32.4+k3s1
+- **CNI**: Cilium 1.17.4 (replaces default flannel)
+- **Storage**: local-path RBD via Rook operator
+- **etcd**: Stored on NVMe (10GiB partition per node)
+- **Pod Security**: Admission controller in Restricted mode
+- **RBAC**: Google OIDC for authentication
+
+### Layer 3: Platform Services
+
+Platform services provide core capabilities required by all applications.
+
+**Service Mesh Architecture:**
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                     Ingress Layer                         │
+│  ┌──────────────────┐              ┌──────────────────┐   │
+│  │ External Ingress │              │ Internal Ingress │   │
+│  │ (ModSecurity)    │              │ (nginx)          │   │
+│  │ Class: external  │              │ Class: internal  │   │
+│  └────────┬─────────┘              └────────┬─────────┘   │
+│           │                                  │            │
+│  ┌────────┴─────────┐              ┌────────┴─────────┐   │
+│  │ Cloudflare Tunnel│              │ MetalLB          │   │
+│  │ (Public Access)  │              │ 192.168.77.200-  │   │
+│  │                  │              │ 192.168.77.254   │   │
+│  └──────────────────┘              └──────────────────┘   │
+└───────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                     Core Platform                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ cert-manager │  │ external-dns │  │ MetalLB      │  │
+│  │ (TLS Certs)  │  │ (DNS Sync)   │  │ (LoadBalancer│  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+└────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                     Secrets Management                │
+│  ┌──────────────────┐          ┌──────────────────┐   │
+│  │ External Secrets │          │ DerivedSecrets   │   │
+│  │ Operator         │          │ Operator         │   │
+│  │ (Integration     │          │ (Argon2 KDF)     │   │
+│  │  sync)           │          │                  │   │
+│  └──────────────────┘          └──────────────────┘   │
+└───────────────────────────────────────────────────────┘
+```
+
+**DNS Management:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  DNS Zones & Authority                      │
+├─────────────────────────────────────────────────────────────┤
+│  PUBLIC                                                     │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ zengarden.space (Cloudflare DNS)                     │   │
+│  │  - Authoritative: Cloudflare                         │   │
+│  │  - Writer: external-dns from K3s                     │   │
+│  │  - Ingress: Oracle Cloud public IP                   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ homelab.zengarden.space (Cloudflare Tunnel)          │   │
+│  │  - Authoritative: Cloudflare                         │   │
+│  │  - Writer: cloudflared                               │   │
+│  │  - Ingress: Tunnel (transparent)                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│  INTERNAL                                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ homelab.int.zengarden.space (MikroTik DNS)           │   │
+│  │  - Authoritative: MikroTik (192.168.77.1)            │   │
+│  │  - Writer: external-dns → restrictive-proxy →        │   │
+│  │            MikroTik REST API                         │   │
+│  │  - Ingress: MetalLB (192.168.77.200-254)             │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Layer 4: GitOps & Automation
+
+**GitOps Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Source of Truth                           │
+│                                                             │
+│  GitHub: github.com/zengarden-space/*                       │
+│           │                                                 │
+│           │ (Bidirectional Sync)                            │
+│           ▼                                                 │
+│  Gitea: gitea.homelab.int.zengarden.space/zengarden-space/* │
+│           │                                                 │
+│           │ (Git Push Event)                                │
+│           ▼                                                 │
+│  ┌────────────────────────────────────────────┐             │
+│  │      Gitea Actions (CI/CD Pipeline)        │             │
+│  │  - Build container images                  │             │
+│  │  - Run tests                               │             │
+│  │  - Push to Gitea registry                  │             │
+│  │  - Update manifests/ repo                  │             │
+│  └──────────────────┬─────────────────────────┘             │
+│                     │                                       │
+│                     │ (Git Commit to manifests/)            │
+│                     ▼                                       │
+│  ┌────────────────────────────────────────────┐             │
+│  │  ArgoCD (GitOps Controller)                │             │
+│  │  - Watches manifests/ repository           │             │
+│  │  - Auto-discovers applications             │             │
+│  │  - Syncs to cluster                        │             │
+│  │  - Self-heal on drift                      │             │
+│  └──────────────────┬─────────────────────────┘             │
+│                     │                                       │
+│                     │ (kubectl apply)                       │
+│                     ▼                                       │
+│  ┌────────────────────────────────────────────┐             │
+│  │      Kubernetes Cluster                    │             │
+│  │  - Deploys applications                    │             │
+│  │  - Creates services                        │             │
+│  │  - Provisions ingress                      │             │
+│  └────────────────────────────────────────────┘             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Custom Operators:**
+
+1. **DerivedSecrets Operator**
+   - Derives deterministic passwords from master key using Argon2id
+   - Creates Kubernetes Secrets based on `DerivedSecret` CRDs
+   - Enables single master password to generate all component credentials
+
+2. **Metabase CNPG Operator**
+   - Watches CloudNativePG `Database` resources
+   - Automatically registers databases in Metabase
+   - Syncs metadata and enables caching
+
+3. **Gitea Automation**
+   - OAuth setup (Playwright-based browser automation)
+   - Repository synchronization (GitHub ↔ Gitea)
+   - Push mirror configuration
+   - ArgoCD webhook creation
+
+### Layer 5: Observability
+
+**Monitoring Architecture:**
+
+```
+┌───────────────────────────────────────────────┐
+│                  Metrics Collection           │
+│                                               │
+│  ┌────────────────┐    ┌────────────────┐     │
+│  │ Prometheus     │    │ Node Exporter  │     │
+│  │ Node Exporters │    │ (per node)     │     │
+│  └────────┬───────┘    └────────┬───────┘     │
+│           │                     │             │
+│           │ (scrape)            │ (scrape)    │
+│           ▼                     ▼             │
+│  ┌────────────────────────────────────────┐   │
+│  │      Victoria Metrics (vmagent)        │   │
+│  │  - Metrics ingestion                   │   │
+│  │  - Time series storage                 │   │
+│  │  - Query engine                        │   │
+│  └────────────────┬───────────────────────┘   │
+│                   │                           │
+│                   │ (PromQL queries)          │
+│                   ▼                           │
+│  ┌────────────────────────────────────────┐   │
+│  │         Grafana Dashboards             │   │
+│  │  - Infrastructure metrics              │   │
+│  │  - Application metrics                 │   │
+│  │  - Custom dashboards                   │   │
+│  └────────────────────────────────────────┘   │
+└───────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────┐
+│                  Alerting Pipeline           │
+│                                              │
+│  ┌────────────────┐                          │
+│  │   vmalert      │                          │
+│  │  - Rule eval   │                          │
+│  └────────┬───────┘                          │
+│           │ (alert)                          │
+│           ▼                                  │
+│  ┌────────────────────────────────────────┐  │
+│  │      AlertManager                      │  │
+│  │  - Alert routing                       │  │
+│  │  - Deduplication                       │  │
+│  │  - Grouping                            │  │
+│  └────────────────┬───────────────────────┘  │
+│                   │                          │
+│                   │ (webhook)                │
+│                   ▼                          │
+│  ┌────────────────────────────────────────┐  │
+│  │  alertmanager-gotify-nodejs            │  │
+│  │  (Webhook → Gotify converter)          │  │
+│  └────────────────┬───────────────────────┘  │
+│                   │                          │
+│                   │ (HTTP POST)              │
+│                   ▼                          │
+│  ┌────────────────────────────────────────┐  │
+│  │         Gotify (Push Notifications)    │  │
+│  │  - Mobile push notifications           │  │
+│  │  - Web UI for alerts                   │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+```
+
+## Component Interaction Patterns
+
+### Secret Flow
+
+```
+1. Master Password (stored in derived-secret-operator namespace)
+        │
+        │ (Argon2id KDF with context)
+        ▼
+2. DerivedSecret CRD (spec.password: 32, spec.apiToken: 48)
+        │
+        │ (operator watches)
+        ▼
+3. Kubernetes Secret (data.password, data.apiToken)
+        │
+        │ (referenced by pod)
+        ▼
+4. Application Pod (env vars from secret)
+```
+
+### Certificate Provisioning Flow
+
+```
+1. Ingress with annotation: cert-manager.io/cluster-issuer: letsencrypt-prod
+        │
+        │ (cert-manager watches)
+        ▼
+2. Certificate resource created
+        │
+        │ (ACME challenge via Cloudflare DNS)
+        ▼
+3. Secret with TLS cert/key created
+        │
+        │ (ingress controller references)
+        ▼
+4. TLS termination at ingress
+```
+
+### DNS Synchronization Flow
+
+```
+1. Ingress/Service with external-dns annotation
+        │
+        │ (external-dns watches)
+        ▼
+2. Webhook call to external-dns-provider-mikrotik
+        │
+        │ (HTTP POST to restrictive-proxy)
+        ▼
+3. Restrictive Proxy validates path (POST /rest/ip/dns/static)
+        │
+        │ (allowed, forwards with auth)
+        ▼
+4. MikroTik REST API creates DNS record
+        │
+        ▼
+5. DNS record available (homelab.int.zengarden.space)
+```
+
+## Scalability Considerations
+
+### Horizontal Scalability
+
+**What scales:**
+- Worker nodes: Add blade006, blade007, etc.
+- Application pods: HPA based on CPU/memory
+- local-path OSDs: Add more NVMe drives
+- MetalLB IP pool: Expand 192.168.77.200-254 range
+
+**What doesn't scale:**
+- etcd cluster (3 nodes recommended, max 5 for latency)
+- Control plane nodes (limited by master node count)
+
+### Vertical Scalability
+
+**Upgradeable:**
+- RAM: CM5 supports 2GB, 4GB, 8GB (currently 8GB)
+- Storage: NVMe SSDs can be upgraded to larger capacity
+- Network: 2.5Gbps possible with appropriate NICs
+
+### High Availability
+
+**HA Components:**
+- 3 master nodes for control plane HA
+- 3 etcd members (quorum: 2/3)
+- local-path: 3-way replication (min_size: 2)
+- ArgoCD: 2 replicas (server, repo-server)
+- Redis HA for ArgoCD
+
+**Single Points of Failure:**
+- MikroTik router (acceptable for homelab)
+- Internet connection (acceptable for homelab)
+- Power supply (UPS recommended)
+
+## Security Architecture
+
+### Trust Boundaries
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Internet (Untrusted)                   │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+                 ┌────────┴───────┐
+                 │  Cloudflare    │ (TLS termination, DDoS protection)
+                 └────────┬───────┘
+                          │
+┌─────────────────────────┴────────────────────────────────┐
+│              MikroTik Firewall (Trust Boundary 1)        │
+│  - Stateful inspection                                   │
+│  - VLAN isolation                                        │
+│  - NAT                                                   │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+           ┌──────────────┼─────────────┐
+           │              │             │
+      ┌────┴────┐   ┌─────┴─────┐  ┌────┴────┐
+      │ VLAN77  │   │  VLAN88   │  │ VLAN100 │
+      │ Cluster │   │   Home    │  │  Mgmt   │
+      └────┬────┘   └───────────┘  └─────────┘
+           │
+┌──────────┴───────────────────────────────────────────────┐
+│         Ingress Controller (Trust Boundary 2)            │
+│  - ModSecurity (external)                                │
+│  - TLS termination                                       │
+│  - Request validation                                    │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+┌─────────────────────────┴────────────────────────────────┐
+│         Network Policies (Trust Boundary 3)              │
+│  - Cilium NetworkPolicy                                  │
+│  - Pod-to-pod restrictions                               │
+│  - Namespace isolation                                   │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+           ┌──────────────┴──────────────┐
+           │                             │
+      ┌────┴────────┐          ┌─────────┴────────┐
+      │ Application │          │  Data Plane      │
+      │    Pods     │          │  (Databases)     │
+      └─────────────┘          └──────────────────┘
+```
+
+### Defense in Depth
+
+**Layer 1: Network**
+- VLAN segmentation
+- Firewall rules (default deny)
+- WireGuard VPN encryption
+
+**Layer 2: Ingress**
+- ModSecurity WAF (external ingress)
+- TLS 1.3 only
+- Rate limiting
+
+**Layer 3: Kubernetes**
+- Pod Security Admission (Restricted)
+- Network Policies (Cilium)
+- RBAC with OIDC
+- Secrets encryption at rest
+
+**Layer 4: Application**
+- Non-root containers
+- Read-only root filesystems
+- Capability dropping
+- AppArmor/seccomp profiles
+
+**Layer 5: Audit**
+- Kubernetes audit logging
+- Victoria Metrics for security events
+- AlertManager for anomaly detection
+
+## Disaster Recovery
+
+### Backup Strategy
+
+**What's backed up:**
+- etcd snapshots (daily)
+- Persistent volumes (local-path snapshots)
+- Git repositories (GitHub + Gitea)
+- Configuration (Git-tracked)
+
+**What's not backed up:**
+- Stateless applications (recreatable from Git)
+- Metrics data (ephemeral)
+- Logs (ephemeral)
+
+### Recovery Procedures
+
+**Scenario 1: Single node failure**
+- K3s: Cluster continues with 2/3 masters
+- local-path: Data accessible with 2/3 OSDs
+- Action: Replace blade, re-join cluster
+
+**Scenario 2: Cluster failure**
+- Restore from Git repositories
+- Run Ansible playbooks to rebuild K3s
+- Deploy helmfile to restore platform
+- ArgoCD self-heals applications
+
+**Scenario 3: Data corruption**
+- Restore local-path snapshots
+- Restore etcd from backup
+- Replay Git commits if needed
+
+## Design Patterns
+
+### Infrastructure as Code Pattern
+- All infrastructure in Git
+- Declarative manifests (YAML)
+- Immutable deployments
+- Version control for changes
+
+### GitOps Pattern
+- Git as single source of truth
+- Automated synchronization
+- Self-healing on drift
+- Audit trail in Git history
+
+### Operator Pattern
+- Custom controllers for domain-specific logic
+- CRDs for declarative config
+- Reconciliation loops
+- Kubernetes-native automation
+
+### Sidecar Pattern
+- Restrictive proxy (credential injection)
+- Metrics exporters
+- Log shippers
+
+## Performance Considerations
+
+### Bottlenecks
+
+**Identified:**
+- Network: 1Gbps per blade (acceptable for homelab)
+- Storage IOPS: NVMe limited by USB3 throughput on CM5
+- CPU: ARM Cortex-A76 (acceptable for most workloads)
+
+**Optimizations:**
+- etcd on NVMe (low-latency storage)
+- Cilium eBPF (bypasses iptables overhead)
+- local-path: Direct NVMe access for OSDs
+
+### Resource Allocation
+
+**Reserved Resources:**
+- etcd: 10GiB NVMe partition per node
+- System: 1GB RAM per node (kubelet, systemd)
+- local-path: Remaining NVMe space
+
+**Available Resources:**
+- Total RAM: 72GB (4 nodes × 16GB + 1 node × 8GB)
+- Total CPU: 20 cores (5 nodes × 4 cores)
+- Total Storage: ~1TB NVMe (local-path)
+
+## Conclusion
+
+This architecture demonstrates how production-grade platform engineering principles can be applied to minimal hardware:
+
+- **Resilience**: HA control plane, distributed storage, self-healing
+- **Security**: Multiple trust boundaries, defense in depth, least privilege
+- **Scalability**: Horizontal scaling for nodes and applications
+- **Observability**: Comprehensive metrics, logs, and alerts
+- **Automation**: GitOps, custom operators, zero manual steps
+
+The modular design ensures each component can be understood, replaced, or upgraded independently while maintaining overall system integrity.
+
+## Next Steps
+
+- Review [Infrastructure Planning](/introduction/infrastructure-planning) for hardware details
+- Explore [Tools & Technology](/introduction/tools) for justification of tool choices
+- Understand [Security](/introduction/security) protocols in depth

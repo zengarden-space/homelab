@@ -1,0 +1,597 @@
+# Monitoring
+
+## Observability Stack
+
+This homelab implements comprehensive monitoring to ensure system health, detect anomalies, and enable quick troubleshooting.
+
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                  Metrics Collection                        │
+│                                                            │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐   │
+│  │ Node        │    │ Kubernetes   │    │ Application  │   │
+│  │ Exporter    │    │ Metrics      │    │ Metrics      │   │
+│  │ (per node)  │    │ (API server) │    │ (custom)     │   │
+│  └──────┬──────┘    └──────┬───────┘    └──────┬───────┘   │
+│         │                  │                   │           │
+│         └──────────────────┴───────────────────┘           │
+│                            │                               │
+│                            ▼                               │
+│                 ┌──────────────────────┐                   │
+│                 │   vmagent (scraper)  │                   │
+│                 └──────────┬───────────┘                   │
+│                            │                               │
+│                            ▼                               │
+│                 ┌──────────────────────┐                   │
+│                 │ Victoria Metrics DB  │                   │
+│                 │ (time-series storage)│                   │
+│                 └──────────┬───────────┘                   │
+└────────────────────────────┼───────────────────────────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+         ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌──────────────────┐
+│    Grafana      │ │    vmalert      │ │   AlertManager   │
+│  (dashboards)   │ │ (rule engine)   │ │  (alert routing) │
+└─────────────────┘ └────────┬────────┘ └────────┬─────────┘
+                             │                   │
+                             └───────┬───────────┘
+                                     ▼
+                          ┌──────────────────────┐
+                          │ alertmanager-gotify  │
+                          │ (webhook converter)  │
+                          └──────────┬───────────┘
+                                     ▼
+                          ┌──────────────────────┐
+                          │       Gotify         │
+                          │ (push notifications) │
+                          └──────────────────────┘
+```
+
+## Components
+
+### Victoria Metrics
+
+**Purpose:** Prometheus-compatible metrics storage
+
+**Why Victoria Metrics over Prometheus:**
+- **50% less RAM usage**
+- **7× better compression**
+- **Faster queries**
+- **100% PromQL compatible**
+
+**Components:**
+- **vmagent**: Scrapes metrics from exporters
+- **vmstorage**: Time-series database
+- **vmselect**: Query engine
+- **vmalert**: Alert rule evaluation
+
+**Access:**
+```
+# VMSelect (query interface)
+http://vmselect.victoria-metrics.svc.cluster.local:8481
+
+# Example query
+curl 'http://vmselect.victoria-metrics.svc.cluster.local:8481/select/0/prometheus/api/v1/query?query=up'
+```
+
+### Grafana
+
+**Purpose:** Metrics visualization and dashboards
+
+**Access:**
+```
+URL: https://grafana.homelab.int.zengarden.space
+Username: admin
+Password: <from victoria-metrics/env.yaml>
+```
+
+**Pre-installed Dashboards:**
+- Node Exporter Full (system metrics)
+- Kubernetes Cluster Monitoring
+- Kubernetes Pods Monitoring
+- Kubernetes Persistent Volumes
+- Victoria Metrics Dashboard
+- local-path Cluster Monitoring
+
+### AlertManager
+
+**Purpose:** Alert routing, grouping, and deduplication
+
+**Access:**
+```
+URL: https://alerts.homelab.int.zengarden.space
+# No authentication by default (internal only)
+```
+
+**Configuration:**
+```yaml
+route:
+  receiver: gotify-notifications
+  group_by: [alertname, cluster, namespace]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: gotify-notifications
+    webhook_configs:
+      - url: http://alertmanager-gotify-nodejs.victoria-metrics.svc:3000/webhook
+        send_resolved: true
+  - name: devnull  # For silenced alerts
+```
+
+### Gotify
+
+**Purpose:** Push notifications to mobile/web
+
+**Access:**
+```
+URL: https://notifications.homelab.int.zengarden.space
+Username: admin
+Password: <from victoria-metrics/env.yaml>
+```
+
+**Mobile App:**
+- Android: [Google Play Store](https://play.google.com/store/apps/details?id=com.github.gotify)
+- iOS: Not officially available (use web UI)
+
+## Key Metrics
+
+### Cluster Health Metrics
+
+| Metric | Description | Query |
+|--------|-------------|-------|
+| **Node Status** | Number of Ready nodes | `kube_node_status_condition{condition="Ready",status="true"}` |
+| **Pod Status** | Pods in Running state | `kube_pod_status_phase{phase="Running"}` |
+| **Pod Restarts** | Container restart count | `rate(kube_pod_container_status_restarts_total[5m])` |
+| **API Server Errors** | API server error rate | `rate(apiserver_request_total{code=~"5.."}[5m])` |
+| **etcd Health** | etcd member health | `etcd_server_has_leader` |
+
+### Resource Utilization Metrics
+
+| Metric | Description | Query |
+|--------|-------------|-------|
+| **CPU Usage** | Node CPU utilization | `100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)` |
+| **RAM Usage** | Node memory utilization | `(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100` |
+| **Disk Usage** | Filesystem usage | `100 - ((node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100)` |
+| **Network TX** | Network transmit bytes | `rate(node_network_transmit_bytes_total[5m])` |
+| **Network RX** | Network receive bytes | `rate(node_network_receive_bytes_total[5m])` |
+
+### Application Metrics
+
+| Metric | Description | Query |
+|--------|-------------|-------|
+| **HTTP Requests** | Request rate | `rate(nginx_ingress_controller_requests[5m])` |
+| **HTTP Errors** | 5xx error rate | `rate(nginx_ingress_controller_requests{status=~"5.."}[5m])` |
+| **Response Time** | p95 latency | `histogram_quantile(0.95, rate(nginx_ingress_controller_request_duration_seconds_bucket[5m]))` |
+| **ArgoCD Sync** | Out-of-sync apps | `argocd_app_info{sync_status!="Synced"}` |
+
+### Storage Metrics (local-path)
+
+| Metric | Description | Query |
+|--------|-------------|-------|
+| **Cluster Health** | local-path health status | `ceph_health_status` (0=OK, 1=WARN, 2=ERR) |
+| **OSD Status** | OSDs up/down | `ceph_osd_up`, `ceph_osd_in` |
+| **Storage Used** | Used capacity | `ceph_cluster_total_used_bytes / ceph_cluster_total_bytes * 100` |
+| **IOPS** | Read/write ops | `rate(ceph_pool_wr[5m])`, `rate(ceph_pool_rd[5m])` |
+
+## Dashboards
+
+### Node Exporter Full Dashboard
+
+**Purpose:** System-level metrics per node
+
+**Panels:**
+- CPU usage (user, system, iowait)
+- Memory usage (used, cached, buffers)
+- Disk I/O (read/write bytes, IOPS)
+- Network I/O (TX/RX bytes, errors)
+- Filesystem usage
+- System load (1m, 5m, 15m)
+- Context switches, interrupts
+- NVMe temperature (if available)
+
+**How to Access:**
+1. Grafana → Dashboards → Browse
+2. Search: "Node Exporter Full"
+3. Select node from dropdown
+
+### Kubernetes Cluster Monitoring Dashboard
+
+**Purpose:** Cluster-wide Kubernetes metrics
+
+**Panels:**
+- Node status (Ready/NotReady)
+- Pod count (Running/Pending/Failed)
+- CPU/RAM requests vs limits vs usage
+- Namespace resource usage
+- Persistent volume claims
+- Top pods by CPU/RAM
+- Network traffic by namespace
+
+### Kubernetes Pods Monitoring Dashboard
+
+**Purpose:** Per-pod metrics
+
+**Panels:**
+- Pod CPU usage
+- Pod memory usage
+- Pod network I/O
+- Container restarts
+- Pod phase (Running/Pending/Failed)
+- Resource requests vs actual usage
+
+**Variables:**
+- Namespace (dropdown)
+- Pod (dropdown)
+
+### Victoria Metrics Dashboard
+
+**Purpose:** Monitor Victoria Metrics itself
+
+**Panels:**
+- Ingestion rate (samples/sec)
+- Query rate (queries/sec)
+- Storage size
+- Memory usage
+- CPU usage
+- Slow queries
+
+### Custom Dashboard Example
+
+**Creating a custom dashboard:**
+
+1. Grafana → Dashboards → New Dashboard
+2. Add Panel
+3. Select Data Source: VictoriaMetrics
+4. Enter PromQL query
+5. Configure visualization (graph, gauge, stat)
+6. Save dashboard
+
+**Example Panel: Application Response Time**
+
+```promql
+histogram_quantile(0.95,
+  rate(
+    nginx_ingress_controller_request_duration_seconds_bucket{
+      exported_namespace="my-app"
+    }[5m]
+  )
+)
+```
+
+**Panel Type:** Time series graph
+**Unit:** seconds
+**Legend:** p95 response time
+
+## Alerts
+
+### Alert Rules
+
+**Location:** Victoria Metrics vmalert configuration
+
+**Example Alert Rules:**
+
+```yaml
+groups:
+  - name: cluster-health
+    interval: 30s
+    rules:
+      - alert: NodeDown
+        expr: up{job="node-exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node {{ $labels.instance }} is down"
+          description: "Node has been unreachable for more than 5 minutes."
+
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+          description: "Pod has restarted {{ $value }} times in the last 15 minutes."
+
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value }}% for more than 10 minutes."
+
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value }}% for more than 10 minutes."
+
+      - alert: DiskSpaceLow
+        expr: |
+          100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk usage is {{ $value }}% on root filesystem."
+
+      - alert: CertificateExpiringSoon
+        expr: |
+          (cert_manager_certificate_expiration_timestamp_seconds - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expiring soon"
+          description: "Certificate expires in {{ $value }} days."
+
+      - alert: ArgocdAppOutOfSync
+        expr: argocd_app_info{sync_status!="Synced"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ArgoCD application {{ $labels.name }} out of sync"
+          description: "Application has been out of sync for more than 15 minutes."
+
+      - alert: local-pathHealthError
+        expr: ceph_health_status == 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "local-path cluster health is ERROR"
+          description: "local-path cluster health has been in ERROR state for 5 minutes."
+```
+
+### Alert Severity Levels
+
+| Severity | Description | Response Time | Examples |
+|----------|-------------|---------------|----------|
+| **Critical** | Service outage or data loss | Immediate (wake up) | Node down, etcd quorum lost, local-path health ERR |
+| **Warning** | Degraded performance or upcoming issue | Within 1 hour | High CPU, certificate expiring soon, pod crash looping |
+| **Info** | Informational, no action required | Review during next maintenance | Deployment updated, backup completed |
+
+### Alert Routing
+
+**AlertManager routes alerts based on severity:**
+
+```yaml
+route:
+  receiver: gotify-notifications
+  routes:
+    - match:
+        severity: critical
+      receiver: gotify-notifications
+      continue: true
+    - match:
+        severity: warning
+      receiver: gotify-notifications
+      continue: true
+    - match:
+        alertname: InfoInhibitor
+      receiver: devnull
+    - match:
+        alertname: Watchdog
+      receiver: devnull
+```
+
+**Gotify Integration:**
+- Critical alerts: High priority (red notification)
+- Warning alerts: Medium priority (yellow notification)
+- Info alerts: Low priority (blue notification)
+
+## Notification Setup
+
+### Gotify Mobile App
+
+**Android:**
+1. Install Gotify app from Google Play Store
+2. Open app → Settings → Add Server
+3. URL: `https://notifications.homelab.int.zengarden.space`
+4. Username: `admin`
+5. Password: `<from victoria-metrics/env.yaml>`
+6. Save
+7. Create Application: "homelab-alerts"
+8. Copy token
+9. Update AlertManager configuration with token
+
+**Web UI:**
+1. Navigate to `https://notifications.homelab.int.zengarden.space`
+2. Login: `admin` / `<password>`
+3. View alerts in real-time
+
+## Custom Metrics
+
+### Exposing Custom Metrics
+
+**For applications to expose metrics:**
+
+1. **Implement `/metrics` endpoint**
+   - Use Prometheus client library
+   - Expose on port (e.g., 8080/metrics)
+
+2. **Add ServiceMonitor CRD**
+   ```yaml
+   apiVersion: monitoring.coreos.com/v1
+   kind: ServiceMonitor
+   metadata:
+     name: my-app
+     namespace: default
+   spec:
+     selector:
+       matchLabels:
+         app: my-app
+     endpoints:
+       - port: metrics
+         path: /metrics
+         interval: 30s
+   ```
+
+3. **Verify scraping**
+   ```bash
+   # Check vmagent targets
+   curl http://vmagent.victoria-metrics.svc:8429/targets
+   ```
+
+### Example: Python Application Metrics
+
+```python
+from prometheus_client import Counter, Histogram, generate_latest
+from flask import Flask, Response
+
+app = Flask(__name__)
+
+# Define metrics
+request_count = Counter('app_requests_total', 'Total requests', ['method', 'endpoint'])
+request_duration = Histogram('app_request_duration_seconds', 'Request duration', ['method', 'endpoint'])
+
+@app.route('/metrics')
+def metrics():
+    return Response(generate_latest(), mimetype='text/plain')
+
+@app.route('/api/data')
+@request_duration.labels(method='GET', endpoint='/api/data').time()
+def get_data():
+    request_count.labels(method='GET', endpoint='/api/data').inc()
+    return {'data': 'example'}
+```
+
+## Log Aggregation (Future Enhancement)
+
+**Currently not implemented, but recommended:**
+
+### Option 1: Loki + Promtail
+
+**Pros:**
+- Lightweight
+- Integrates with Grafana
+- Label-based querying (like Prometheus)
+
+**Cons:**
+- Not full-text search (use labels for filtering)
+
+### Option 2: OpenSearch (ElasticSearch fork)
+
+**Pros:**
+- Full-text search
+- Powerful querying (DSL)
+- Kibana-compatible UI
+
+**Cons:**
+- Resource intensive
+- More complex setup
+
+**Recommendation:** Loki for homelab (lighter resource footprint)
+
+## Troubleshooting Monitoring
+
+### No Metrics in Grafana
+
+**Check vmagent scraping:**
+```bash
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=vmagent --tail=50
+
+# Check targets
+kubectl -n victoria-metrics port-forward svc/vmagent 8429:8429
+curl http://localhost:8429/targets | jq
+```
+
+**Check Victoria Metrics storage:**
+```bash
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=vmstorage --tail=50
+```
+
+### Alerts Not Firing
+
+**Check vmalert:**
+```bash
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=vmalert --tail=50
+
+# Check rules loaded
+kubectl -n victoria-metrics port-forward svc/vmalert 8880:8880
+curl http://localhost:8880/api/v1/rules | jq
+```
+
+**Check AlertManager:**
+```bash
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=alertmanager --tail=50
+
+# Check alerts
+curl http://alerts.homelab.int.zengarden.space/api/v2/alerts
+```
+
+### Gotify Not Receiving Alerts
+
+**Check alertmanager-gotify-nodejs:**
+```bash
+kubectl -n victoria-metrics logs -l app=alertmanager-gotify-nodejs --tail=50
+```
+
+**Verify webhook URL:**
+```bash
+kubectl -n victoria-metrics get configmap alertmanager -o yaml | grep gotify
+```
+
+**Test webhook manually:**
+```bash
+curl -X POST http://alertmanager-gotify-nodejs.victoria-metrics.svc:3000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alerts": [{
+      "status": "firing",
+      "labels": {"alertname": "TestAlert", "severity": "warning"},
+      "annotations": {"summary": "Test alert", "description": "This is a test"}
+    }]
+  }'
+```
+
+## Best Practices
+
+### Dashboard Design
+
+1. **Use template variables** for namespace, pod, node selection
+2. **Show rates, not absolute counters** (use `rate()` or `irate()`)
+3. **Set appropriate time ranges** (5m for real-time, 24h for trends)
+4. **Use percentiles for latency** (p50, p95, p99)
+5. **Set thresholds and alerts** on panels
+
+### Alert Design
+
+1. **Alert on symptoms, not causes** (e.g., "service down" not "pod restarting")
+2. **Set appropriate `for` duration** (avoid flapping)
+3. **Include actionable annotations** (what to do, where to look)
+4. **Group related alerts** (avoid alert storms)
+5. **Test alerts** (manually trigger to verify)
+
+### Metric Naming
+
+Follow Prometheus naming conventions:
+- **Counters**: `*_total` suffix (e.g., `requests_total`)
+- **Gauges**: No suffix (e.g., `memory_usage_bytes`)
+- **Histograms**: `*_bucket`, `*_sum`, `*_count` (e.g., `request_duration_seconds_bucket`)
+
+## Next Steps
+
+- Configure custom dashboards for your applications
+- Set up additional alerts for specific use cases
+- Integrate with log aggregation (Loki) for complete observability
+- Review [Maintenance](/operations/maintenance) for regular monitoring tasks
+
+---
+
+*Comprehensive monitoring enables proactive issue detection and fast troubleshooting.*

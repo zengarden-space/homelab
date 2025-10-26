@@ -1,0 +1,295 @@
+# Deployment Guide
+
+## Day 1: Infrastructure Deployment
+
+This section provides step-by-step instructions to deploy the complete homelab platform from bare metal to running applications.
+
+## Overview
+
+The deployment process follows a specific order to ensure dependencies are satisfied:
+
+```
+1. Infrastructure (bare metal, OS, networking)
+       ↓
+2. Core Platform (Kubernetes, platform services)
+       ↓
+3. Applications (GitOps, CI/CD, user applications)
+```
+
+## Deployment Stages
+
+### [Infrastructure Deployment](/deployment/infrastructure)
+
+**What:** Bare metal setup, OS installation, network configuration, K3s cluster installation
+
+**Steps:**
+1. Raspberry Pi OS bootstrap
+2. MikroTik router configuration
+3. Google OAuth credentials setup
+4. SSH key distribution
+5. NVMe drive partitioning
+6. K3s cluster installation
+7. Restrictive proxy deployment
+
+**Duration:** 2-3 hours
+
+**Prerequisites:**
+- 5× Raspberry Pi CM5 blades with NVMe
+- MikroTik router
+- Network switch
+- Google Cloud account (for OIDC)
+
+---
+
+### [Core Platform Deployment](/deployment/core-platform)
+
+**What:** Helmfile-based deployment of core Kubernetes services
+
+**Steps:**
+1. Configure `integrations.yaml` (external credentials)
+2. Configure component `.env` files
+3. Deploy helmfile in order:
+   - MetalLB + secrets-system
+   - cert-manager + external-dns
+   - ingress-nginx + external-tunnel
+   - victoria-metrics
+   - argocd + gitea
+   - cnpg-system + metabase
+
+**Duration:** 1-2 hours
+
+**Prerequisites:**
+- K3s cluster running
+- Cloudflare account + API token
+- GitHub personal access token
+- Domain name (zengarden.space)
+
+---
+
+### [Applications Deployment](/deployment/applications)
+
+**What:** GitOps-based application deployment through Gitea Actions and ArgoCD
+
+**Flow:**
+```
+GitHub (zengarden-space org)
+    ↓ (sync)
+Gitea (gitea.homelab.int.zengarden.space)
+    ↓ (push event)
+Gitea Actions (CI/CD pipeline)
+    ↓ (build + push)
+manifests repository
+    ↓ (ArgoCD watches)
+Kubernetes cluster
+```
+
+**Steps:**
+1. Verify Gitea-GitHub synchronization
+2. Configure Gitea Actions runners
+3. Push application code to Gitea
+4. Trigger CI/CD pipeline
+5. Verify ArgoCD deployment
+
+**Duration:** 30 minutes - 1 hour
+
+**Prerequisites:**
+- Core platform deployed
+- Gitea running with GitHub sync
+- ArgoCD operational
+
+---
+
+## Deployment Order
+
+**Critical**: Follow this order to satisfy dependencies
+
+| Stage | Component | Why | Dependencies |
+|-------|-----------|-----|--------------|
+| **1** | Infrastructure | Bare metal + OS | None |
+| **2** | K3s cluster | Kubernetes foundation | Infrastructure |
+| **3** | MetalLB | Load balancer (needed for ingress) | K3s |
+| **4** | secrets-system | Secrets (needed by all components) | K3s |
+| **5** | cert-manager | TLS certs (needed by ingress) | K3s, secrets-system |
+| **6** | external-dns | DNS automation | K3s, secrets-system |
+| **7** | ingress-nginx | HTTP(S) routing | K3s, MetalLB, cert-manager |
+| **8** | external-tunnel | Cloudflare Tunnel | ingress-nginx, cert-manager |
+| **9** | victoria-metrics | Monitoring | K3s, ingress-nginx |
+| **10** | argocd | GitOps | K3s, ingress-nginx, secrets-system |
+| **11** | gitea | Git server + CI/CD | K3s, ingress-nginx, secrets-system |
+| **12** | cnpg-system | PostgreSQL operator | K3s |
+| **13** | metabase | Analytics | cnpg-system, ingress-nginx |
+| **14** | Applications | User workloads | ArgoCD, Gitea |
+
+## Prerequisites Checklist
+
+Before starting deployment:
+
+### Hardware
+- [ ] 5× Raspberry Pi CM5 blades (8GB RAM)
+- [ ] 5× NVMe SSDs (M.2 2242 form factor)
+- [ ] MikroTik router (hEX S or similar)
+- [ ] Network switch (PoE preferred)
+- [ ] Ethernet cables (Cat6 or better)
+- [ ] Power supplies
+
+### Accounts & Credentials
+- [ ] Google Cloud account (for OIDC)
+- [ ] Cloudflare account (for DNS + Tunnel)
+- [ ] GitHub account (for repository sync)
+- [ ] Domain name registered (e.g., zengarden.space)
+
+### Software
+- [ ] Ansible installed on management workstation
+- [ ] kubectl installed
+- [ ] helm installed
+- [ ] helmfile installed
+- [ ] Git installed
+
+### Knowledge
+- [ ] Basic Linux administration
+- [ ] Kubernetes fundamentals
+- [ ] YAML syntax
+- [ ] Git workflows
+
+## Post-Deployment Verification
+
+After completing all stages:
+
+### Infrastructure
+```bash
+# Verify K3s cluster
+kubectl get nodes
+# Expected: 5 nodes in Ready state
+
+# Verify Cilium CNI
+kubectl -n kube-system get pods -l k8s-app=cilium
+# Expected: 5 cilium pods in Running state
+
+# Verify local-path storage
+kubectl -n rook-ceph get cephcluster
+# Expected: HEALTH_OK status
+```
+
+### Core Platform
+```bash
+# Verify MetalLB
+kubectl -n metallb-system get ipaddresspools
+# Expected: IP pool 192.168.77.200-254
+
+# Verify cert-manager
+kubectl get clusterissuers
+# Expected: letsencrypt-prod, internal-ca
+
+# Verify ingress
+kubectl -n ingress-nginx get svc ingress-nginx-internal-controller
+# Expected: LoadBalancer with external IP
+
+# Verify ArgoCD
+kubectl -n argocd get applications
+# Expected: Applications listed with Synced status
+
+# Verify Gitea
+kubectl -n gitea get pods
+# Expected: gitea pod in Running state
+```
+
+### Applications
+```bash
+# Verify ArgoCD applications
+argocd app list
+# Expected: All apps Healthy and Synced
+
+# Verify Gitea sync
+# Navigate to: https://gitea.homelab.int.zengarden.space
+# Expected: Repositories visible
+```
+
+## Troubleshooting
+
+Common issues and solutions:
+
+### K3s Installation Fails
+**Symptom:** K3s service fails to start
+
+**Causes:**
+- Insufficient disk space for etcd
+- Port conflicts (6443, 10250)
+- Firewall blocking required ports
+
+**Solution:**
+```bash
+# Check disk space
+df -h /var/lib/rancher/k3s
+
+# Check port availability
+sudo netstat -tulpn | grep -E '6443|10250'
+
+# Review K3s logs
+sudo journalctl -u k3s -f
+```
+
+### Helmfile Deployment Fails
+**Symptom:** Helm release fails to install
+
+**Causes:**
+- Missing `.env` file
+- Invalid `integrations.yaml` credentials
+- Dependency not satisfied
+
+**Solution:**
+```bash
+# Verify .env files exist
+ls -la */env.yaml
+
+# Check helmfile diff
+helmfile -f argocd/helmfile.yaml diff
+
+# Deploy with verbose logging
+helmfile -f argocd/helmfile.yaml apply --debug
+```
+
+### Ingress Not Accessible
+**Symptom:** Cannot reach services via ingress
+
+**Causes:**
+- MetalLB not assigning IP
+- DNS not configured
+- Firewall blocking ports 80/443
+
+**Solution:**
+```bash
+# Check LoadBalancer IP
+kubectl -n ingress-nginx get svc
+
+# Verify DNS records
+nslookup gitea.homelab.int.zengarden.space 192.168.77.1
+
+# Test direct IP access
+curl -k https://192.168.77.200
+```
+
+## Deployment Timeline
+
+**Total Time:** ~4-6 hours (first deployment)
+
+| Stage | Duration | Notes |
+|-------|----------|-------|
+| **Infrastructure** | 2-3 hours | Mostly automated (Ansible) |
+| **Core Platform** | 1-2 hours | Helmfile deploys in sequence |
+| **Applications** | 30min-1hr | GitOps automation |
+| **Verification** | 30min | Testing all services |
+
+**Subsequent deployments:** ~1 hour (infrastructure as code FTW!)
+
+## Next Steps
+
+Ready to deploy?
+
+1. Start with [Infrastructure Deployment](/deployment/infrastructure)
+2. Continue to [Core Platform](/deployment/core-platform)
+3. Finish with [Applications](/deployment/applications)
+4. Learn about [Operations](/operations) for ongoing maintenance
+
+---
+
+*Follow these steps carefully and you'll have a production-grade Kubernetes homelab running in a few hours!*

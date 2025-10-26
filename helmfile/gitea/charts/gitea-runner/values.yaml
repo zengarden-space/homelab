@@ -1,5 +1,8 @@
+# Domain configuration
+domain: zengarden.space
+
 gitea:
-  url: "https://gitea.homelab.int.zengarden.space"
+  url: ""  # Set dynamically via helmfile
   image: "docker.gitea.com/gitea:1.23.8-rootless"
 
 runner:

@@ -35,7 +35,7 @@ export default async function RootLayout({children}: { children: ReactNode }) {
             }
             footer={
                 <Footer>
-                    {new Date().getFullYear()} © Homelab documentation by Oleksiy Pylypenko
+                    {new Date().getFullYear()} © zengarden.space homelab documentation
                 </Footer>
             }
             docsRepositoryBase="https://gitea.homelab.int.zengarden.space/zengarden-space"
