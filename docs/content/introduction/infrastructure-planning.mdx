@@ -69,7 +69,7 @@ This section provides comprehensive infrastructure planning details, including h
 
 | Feature | Specification | Usage |
 |---------|---------------|-------|
-| **Ports** | 5× Gigabit Ethernet + 1× SFP | WAN, VLANs, management |
+| **Ports** | 5× Gigabit Ethernet + 1× SFP | WAN, networks, management |
 | **CPU** | Dual-core 880 MHz MIPS | Routing, firewall, DNS |
 | **RAM** | 256MB | RouterOS + tables |
 | **PoE** | PoE-out on port 5 | Powering devices |
@@ -77,15 +77,15 @@ This section provides comprehensive infrastructure planning details, including h
 
 **Port Assignment:**
 - **eth1**: Optical WAN (fiber internet, failover to LTE)
-- **eth2**: VLAN77 trunk (to Zyxel switch → blades 001-004)
-- **eth3**: VLAN77 access (direct to blade005)
-- **eth4**: VLAN88 (home network)
-- **eth5**: VLAN100 (management workstation, 1Gbps)
+- **eth2**: Cluster network trunk (to Zyxel switch → blades 001-004)
+- **eth3**: Cluster network access (direct to blade005)
+- **eth4**: Home network
+- **eth5**: Management network (management workstation, 1Gbps)
 
 **Features Used:**
-- VLAN tagging (802.1Q)
+- Network segmentation (802.1Q)
 - Stateful firewall
-- DHCP server (per VLAN)
+- DHCP server (per network)
 - DNS server (internal zone)
 - WireGuard VPN server
 - NAT (masquerade)
@@ -108,7 +108,7 @@ This section provides comprehensive infrastructure planning details, including h
 - blade004: PoE powered
 - Uplink: MikroTik eth2
 
-**Note:** blade005 connected directly to MikroTik eth3 (separate VLAN access port)
+**Note:** blade005 connected directly to MikroTik eth3 (separate access port)
 
 ### Network Topology
 
@@ -120,11 +120,11 @@ This section provides comprehensive infrastructure planning details, including h
 ┌──────────────────────────┴──────────────────────────────────┐
 │              MikroTik hEX S (Router)                        │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │  Firewall │ VLAN Routing │ DNS │ DHCP │ WireGuard    │   │
+│  │  Firewall │ Network Routing │ DNS │ DHCP │ WireGuard │   │
 │  └──────────────────────────────────────────────────────┘   │
 ├────────────┬──────────────┬──────────────┬──────────────────┤
-│ VLAN77     │  VLAN88      │  VLAN100     │  WireGuard VPN   │
-│ (Cluster)  │  (Home)      │  (Mgmt)      │  (Remote)        │
+│ Cluster    │  Home        │  Management  │  WireGuard VPN   │
+│ Network    │  Network     │  Network     │  (Remote)        │
 │ .77.0/24   │  .88.0/24    │  .100.0/24   │  10.8.0.0/24     │
 └─────┬──────┴──────────────┴──────────────┴──────────────────┘
       │
@@ -136,14 +136,14 @@ This section provides comprehensive infrastructure planning details, including h
       └─── Direct Connection ─── blade005 (.77.15)
 ```
 
-### VLAN Design
+### Network Design
 
-| VLAN | Network | Gateway | DNS | Purpose | Firewall Policy |
-|------|---------|---------|-----|---------|----------------|
-| **77** | 192.168.77.0/24 | .77.1 | .77.1 | K3s cluster nodes | Allow internet, block VLAN88→77 except 80/443, block VLAN100 |
-| **88** | 192.168.88.0/24 | .88.1 | .88.1 | Home devices | Allow internet, allow 77:80/443 (web services) |
-| **100** | 192.168.100.0/24 | .100.1 | .100.1 | Admin workstation | Full access (all VLANs + internet), no inbound |
-| **WG** | 10.8.0.0/24 | .77.15 | .77.1 | VPN clients | Access VLAN77 + pod/service networks, block VLAN88/100 |
+| Network | Subnet | Gateway | DNS | Purpose | Firewall Policy |
+|---------|--------|---------|-----|---------|----------------|
+| **Cluster** | 192.168.77.0/24 | .77.1 | .77.1 | K3s cluster nodes | Allow internet, limited inbound from home network (80/443 only) |
+| **Home** | 192.168.88.0/24 | .88.1 | .88.1 | Home devices | Allow internet, allow cluster:80/443 (web services) |
+| **Management** | 192.168.100.0/24 | .100.1 | .100.1 | Admin workstation | Full access (all networks + internet), no inbound |
+| **WireGuard** | 10.8.0.0/24 | .77.15 | .77.1 | VPN clients | Access cluster + pod/service networks, blocked from home/mgmt |
 
 ### Power Budget
 

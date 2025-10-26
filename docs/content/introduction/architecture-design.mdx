@@ -26,10 +26,10 @@ This homelab implements a **multi-layered, security-hardened architecture** desi
 ┌─────────────────────────────┴──────────────────────────────────┐
 │                      MikroTik Router (hEX S)                   │
 │                                                                │
-│  Firewall Rules │ VLAN Management │ DNS │ DHCP │ WireGuard     │
+│  Firewall Rules │ Network Routing │ DNS │ DHCP │ WireGuard     │
 ├────────────┬────────────────┬──────────────────┬───────────────┤
-│  VLAN77    │    VLAN88      │    VLAN100       │  WireGuard VPN│
-│  (Cluster) │    (Home)      │   (Management)   │  10.8.0.0/24  │
+│  Cluster   │    Home        │   Management     │  WireGuard VPN│
+│  Network   │    Network     │   Network        │  10.8.0.0/24  │
 │  eth2+eth3 │    eth4        │    eth5          │               │
 └─────┬──────┴────────────────┴──────────────────┴───────────────┘
       │
@@ -41,21 +41,21 @@ This homelab implements a **multi-layered, security-hardened architecture** desi
       └─ Direct Connection ──── blade005 (192.168.77.174)
 ```
 
-**VLAN Segmentation:**
+**Network Segmentation:**
 
-| VLAN | Network | Purpose | Access Rules |
-|------|---------|---------|--------------|
-| **VLAN77** | 192.168.77.0/24 | K3s cluster nodes | Internet access, isolated from VLAN88, blocked from VLAN100 |
-| **VLAN88** | 192.168.88.0/24 | Home devices (WiFi, laptops) | Internet access, limited K3s service access via MetalLB |
-| **VLAN100** | 192.168.100.0/24 | Management workstation | Full access to all networks, no inbound access allowed |
-| **WireGuard** | 10.8.0.0/24 | VPN clients | Access to VLAN77 + pod/service networks, blocked from VLAN88/100 |
+| Network | Subnet | Purpose | Access Rules |
+|---------|--------|---------|--------------|
+| **Cluster** | 192.168.77.0/24 | K3s cluster nodes | Internet access, isolated from home network, limited inbound access |
+| **Home** | 192.168.88.0/24 | Home devices (WiFi, laptops) | Internet access, limited cluster service access via MetalLB |
+| **Management** | 192.168.100.0/24 | Management workstation | Full access to all networks, no inbound access allowed |
+| **WireGuard** | 10.8.0.0/24 | VPN clients | Access to cluster + pod/service networks, blocked from home/mgmt |
 
 **Firewall Strategy:**
 - Default deny-all with explicit allow rules
-- VLAN100 → All (management access)
-- VLAN88 → VLAN77:80,443 (web services only)
-- WireGuard → VLAN77 + Pod/Service CIDRs
-- VLAN77 → Internet (for updates and external integrations)
+- Management → All (management access)
+- Home → Cluster:80,443 (web services only)
+- WireGuard → Cluster + Pod/Service CIDRs
+- Cluster → Internet (for updates and external integrations)
 
 ### Layer 2: Kubernetes Infrastructure
 
@@ -405,15 +405,15 @@ Platform services provide core capabilities required by all applications.
 ┌─────────────────────────┴────────────────────────────────┐
 │              MikroTik Firewall (Trust Boundary 1)        │
 │  - Stateful inspection                                   │
-│  - VLAN isolation                                        │
+│  - Network isolation                                     │
 │  - NAT                                                   │
 └─────────────────────────┬────────────────────────────────┘
                           │
            ┌──────────────┼─────────────┐
            │              │             │
       ┌────┴────┐   ┌─────┴─────┐  ┌────┴────┐
-      │ VLAN77  │   │  VLAN88   │  │ VLAN100 │
       │ Cluster │   │   Home    │  │  Mgmt   │
+      │ Network │   │  Network  │  │ Network │
       └────┬────┘   └───────────┘  └─────────┘
            │
 ┌──────────┴───────────────────────────────────────────────┐
@@ -441,7 +441,7 @@ Platform services provide core capabilities required by all applications.
 ### Defense in Depth
 
 **Layer 1: Network**
-- VLAN segmentation
+- Network segmentation
 - Firewall rules (default deny)
 - WireGuard VPN encryption
 

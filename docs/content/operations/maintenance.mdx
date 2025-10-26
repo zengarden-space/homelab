@@ -296,10 +296,7 @@ ssh admin@192.168.77.1
 # List firewall rules
 /ip firewall filter print
 
-# Verify:
-# - VLAN88 (home) blocked from VLAN77 except 80/443
-# - VLAN100 (management) has no inbound access
-# - WireGuard VPN blocked from VLAN88/100
+# Verify firewall rules are properly configured for network segmentation
 ```
 
 #### 3. Review Network Policies
