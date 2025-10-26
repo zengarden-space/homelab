@@ -100,8 +100,6 @@ This homelab implements a **multi-layered, security-hardened architecture** desi
 
 Platform services provide core capabilities required by all applications.
 
-**Service Mesh Architecture:**
-
 ```
 ┌───────────────────────────────────────────────────────────┐
 │                     Ingress Layer                         │
@@ -110,7 +108,7 @@ Platform services provide core capabilities required by all applications.
 │  │ (ModSecurity)    │              │ (nginx)          │   │
 │  │ Class: external  │              │ Class: internal  │   │
 │  └────────┬─────────┘              └────────┬─────────┘   │
-│           │                                  │            │
+│           │                                 │             │
 │  ┌────────┴─────────┐              ┌────────┴─────────┐   │
 │  │ Cloudflare Tunnel│              │ MetalLB          │   │
 │  │ (Public Access)  │              │ 192.168.77.200-  │   │
@@ -380,14 +378,13 @@ Platform services provide core capabilities required by all applications.
 **HA Components:**
 - 3 master nodes for control plane HA
 - 3 etcd members (quorum: 2/3)
-- local-path: 3-way replication (min_size: 2)
 - ArgoCD: 2 replicas (server, repo-server)
 - Redis HA for ArgoCD
 
 **Single Points of Failure:**
 - MikroTik router (acceptable for homelab)
-- Internet connection (acceptable for homelab)
-- Power supply (UPS recommended)
+- Internet connection (LTE planned)
+- Power supply (UPS planned)
 
 ## Security Architecture
 
@@ -416,19 +413,19 @@ Platform services provide core capabilities required by all applications.
       │ Network │   │  Network  │  │ Network │
       └────┬────┘   └───────────┘  └─────────┘
            │
-┌──────────┴───────────────────────────────────────────────┐
-│         Ingress Controller (Trust Boundary 2)            │
-│  - ModSecurity (external)                                │
-│  - TLS termination                                       │
-│  - Request validation                                    │
-└─────────────────────────┬────────────────────────────────┘
+┌──────────┴─────────────────────────────────────┐
+│         Ingress Controller (Trust Boundary 2)  │
+│  - ModSecurity (external)                      │
+│  - TLS termination                             │
+│  - Request validation                          │
+└─────────────────────────┬──────────────────────┘
                           │
-┌─────────────────────────┴────────────────────────────────┐
-│         Network Policies (Trust Boundary 3)              │
-│  - Cilium NetworkPolicy                                  │
-│  - Pod-to-pod restrictions                               │
-│  - Namespace isolation                                   │
-└─────────────────────────┬────────────────────────────────┘
+┌─────────────────────────┴──────────────────────┐
+│         Network Policies (Trust Boundary 3)    │
+│  - Cilium NetworkPolicy                        │
+│  - Pod-to-pod restrictions                     │
+│  - Namespace isolation                         │
+└─────────────────────────┬──────────────────────┘
                           │
            ┌──────────────┴──────────────┐
            │                             │
@@ -486,7 +483,6 @@ Platform services provide core capabilities required by all applications.
 
 **Scenario 1: Single node failure**
 - K3s: Cluster continues with 2/3 masters
-- local-path: Data accessible with 2/3 OSDs
 - Action: Replace blade, re-join cluster
 
 **Scenario 2: Cluster failure**
@@ -496,7 +492,6 @@ Platform services provide core capabilities required by all applications.
 - ArgoCD self-heals applications
 
 **Scenario 3: Data corruption**
-- Restore local-path snapshots
 - Restore etcd from backup
 - Replay Git commits if needed
 
