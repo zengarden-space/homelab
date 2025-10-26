@@ -1,0 +1,721 @@
+# Operations Guide
+
+## Day-to-Day Cluster Management
+
+This guide covers common operational tasks, troubleshooting procedures, and best practices for maintaining the homelab cluster.
+
+## Quick Reference
+
+### Essential Commands
+
+**Cluster Status**:
+```bash
+# Node health
+kubectl get nodes
+
+# Pod status across all namespaces
+kubectl get pods -A
+
+# Recent events
+kubectl get events -A --sort-by='.lastTimestamp' | tail -20
+
+# Resource usage
+kubectl top nodes
+kubectl top pods -A
+```
+
+**Application Status**:
+```bash
+# ArgoCD applications
+kubectl get applications -n argocd
+
+# Gitea health
+kubectl get pods -n gitea
+
+# Ingress status
+kubectl get ingress -A
+```
+
+**Logs**:
+```bash
+# Follow pod logs
+kubectl logs -f -n <namespace> <pod-name>
+
+# Logs from all pods in deployment
+kubectl logs -n <namespace> deployment/<name> --all-containers=true -f
+
+# Previous pod logs (after crash)
+kubectl logs -n <namespace> <pod-name> --previous
+```
+
+### Accessing Services
+
+**Internal Access (via VPN or home network)**:
+- **ArgoCD**: https://argocd.homelab.int.zengarden.space
+- **Gitea**: https://gitea.homelab.int.zengarden.space
+- **Grafana**: https://grafana.homelab.int.zengarden.space
+- **Metabase**: https://metabase.homelab.int.zengarden.space
+
+
+**SSH Access to Nodes**:
+```bash
+# From home network or VPN
+ssh oleksiyp@blade001
+ssh oleksiyp@blade002
+# ... blade003, blade004, blade005
+```
+
+## Common Tasks
+
+### 1. Deploying a New Application
+
+**Via ArgoCD ApplicationSet** (recommended):
+
+1. **Create manifests directory**:
+```bash
+cd manifests
+mkdir -p manifests/my-app
+```
+
+2. **Add Kubernetes manifests**:
+```yaml
+# manifests/my-app/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: app
+        image: gitea.homelab.int.zengarden.space/zengarden-space/my-app:latest
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    external-dns.alpha.kubernetes.io/hostname: my-app.homelab.int.zengarden.space
+spec:
+  ingressClassName: internal
+  tls:
+  - hosts:
+    - my-app.homelab.int.zengarden.space
+    secretName: my-app-tls
+  rules:
+  - host: my-app.homelab.int.zengarden.space
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: my-app
+            port:
+              number: 80
+```
+
+3. **Commit and push**:
+```bash
+git add manifests/my-app/
+git commit -m "Add my-app deployment"
+git push
+```
+
+4. **ArgoCD auto-discovers and deploys** (within 3 minutes)
+
+5. **Verify deployment**:
+```bash
+kubectl get application my-app -n argocd
+kubectl get pods -l app=my-app
+```
+
+6. **Access application**:
+```bash
+# Wait for DNS and certificate (1-2 minutes)
+curl https://my-app.homelab.int.zengarden.space
+```
+
+### 2. Updating an Application
+
+**Image Update**:
+```bash
+cd manifests/my-app
+sed -i 's|image: .*|image: gitea.homelab.int.zengarden.space/zengarden-space/my-app:v1.2.3|' deployment.yaml
+git commit -am "Update my-app to v1.2.3"
+git push
+# ArgoCD syncs automatically
+```
+
+**Configuration Change**:
+```bash
+cd manifests/my-app
+# Edit deployment.yaml (e.g., change replicas, env vars)
+git commit -am "Scale my-app to 3 replicas"
+git push
+# ArgoCD syncs automatically
+```
+
+### 3. Rolling Back an Application
+
+**Via Git revert**:
+```bash
+cd manifests
+git log --oneline manifests/my-app/
+# abc123 Bad deployment
+# def456 Previous good version
+git revert abc123
+git push
+# ArgoCD rolls back automatically
+```
+
+**Via ArgoCD UI**:
+1. Navigate to https://argocd.homelab.int.zengarden.space
+2. Click application → History tab
+3. Select previous revision
+4. Click "Rollback"
+5. Confirm
+
+### 4. Accessing Application Logs
+
+**Via kubectl**:
+```bash
+# Logs from all pods
+kubectl logs -n default -l app=my-app -f --all-containers=true
+
+# Logs from specific pod
+kubectl logs -n default my-app-7d8f9c6b5-abc12 -f
+
+# Previous pod logs (after crash)
+kubectl logs -n default my-app-7d8f9c6b5-abc12 --previous
+```
+
+**Via Victoria Metrics / Grafana**:
+1. Navigate to https://grafana.homelab.int.zengarden.space
+2. Explore → Select data source: Victoria Metrics
+3. Query: `{namespace="default",app="my-app"}`
+
+### 5. Scaling an Application
+
+**Manually**:
+```bash
+kubectl scale deployment my-app -n default --replicas=5
+```
+
+**Declaratively** (recommended):
+```bash
+cd manifests/my-app
+# Edit deployment.yaml: replicas: 5
+git commit -am "Scale my-app to 5 replicas"
+git push
+```
+
+**Horizontal Pod Autoscaler**:
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+```
+
+### 6. Creating Secrets
+
+**Via DerivedSecret** (recommended):
+```yaml
+apiVersion: zengarden.space/v1
+kind: DerivedSecret
+metadata:
+  name: my-app-secrets
+  namespace: default
+spec:
+  DATABASE_PASSWORD: 32
+  API_KEY: 64
+  JWT_SECRET: 64
+```
+
+**Manually**:
+```bash
+kubectl create secret generic my-app-secrets \
+  --from-literal=DATABASE_PASSWORD=xxx \
+  --from-literal=API_KEY=yyy \
+  -n default
+```
+
+### 7. Updating Infrastructure Components
+
+**Via Helmfile**:
+```bash
+cd helmfile/<component>
+
+# Check current version
+helmfile list
+
+# Update version in helmfile.yaml.gotmpl
+vim helmfile.yaml.gotmpl
+
+# Preview changes
+helmfile diff
+
+# Apply update
+helmfile apply
+
+# Verify
+kubectl get pods -n <component-namespace>
+```
+
+**Example: Update cert-manager**:
+```bash
+cd helmfile/cert-manager
+# Edit helmfile.yaml.gotmpl: version: 1.18.2
+helmfile diff
+helmfile apply
+kubectl get pods -n cert-manager
+```
+
+### 8. Adding a New Node
+
+**Provision hardware**:
+1. Add CM5 blade to cluster
+2. Configure network (VLAN77, static IP)
+3. Install Raspberry Pi OS
+
+**Update Ansible inventory**:
+```yaml
+# ansible/install-k3s/hosts.yaml
+workers:
+  hosts:
+    blade004:
+      ansible_user: oleksiyp
+      ansible_host: blade004
+    blade005:
+      ansible_user: oleksiyp
+      ansible_host: blade005
+    blade006:  # New node
+      ansible_user: oleksiyp
+      ansible_host: blade006
+```
+
+**Partition NVMe**:
+```bash
+cd ansible/partition-nvme-drives
+# Update hosts.yaml
+./install.sh
+```
+
+**Join cluster**:
+```bash
+cd ansible/install-k3s
+./install.sh
+```
+
+**Verify**:
+```bash
+kubectl get nodes
+# blade006 should appear as Ready
+```
+
+### 9. Certificate Renewal
+
+**Automatic** (cert-manager handles this):
+- Let's Encrypt certificates renewed 30 days before expiration
+- No manual intervention required
+
+**Force renewal**:
+```bash
+# Delete certificate secret
+kubectl delete secret <tls-secret-name> -n <namespace>
+
+# cert-manager will reissue immediately
+kubectl get certificate -n <namespace> -w
+```
+
+### 10. DNS Record Updates
+
+**Automatic** (external-dns handles this):
+- Ingress annotations → DNS records
+- Service annotations → DNS records
+
+**Manual verification**:
+```bash
+# Check external-dns logs
+kubectl logs -n external-dns deployment/external-dns
+
+# Verify DNS record in MikroTik
+# Access MikroTik WebFig → IP → DNS → Static
+
+# Test resolution
+dig my-app.homelab.int.zengarden.space
+```
+
+## Monitoring & Observability
+
+### Grafana Dashboards
+
+**Node Metrics**:
+- CPU usage per node
+- Memory utilization
+- Disk I/O
+- Network throughput
+
+**Pod Metrics**:
+- Pod restarts
+- Container CPU/memory
+- Replica counts
+- Deployment status
+
+**Application Metrics**:
+- HTTP request rates (from ingress)
+- Response times
+- Error rates
+
+### AlertManager Notifications
+
+**Alert Routing** (to Gotify):
+```yaml
+receivers:
+  - name: gotify
+    webhook_configs:
+      - url: http://gotify.default.svc.cluster.local/message
+        send_resolved: true
+```
+
+**Common Alerts**:
+- `NodeDown`: Node unreachable for >5 minutes
+- `PodCrashLooping`: Pod restarting repeatedly
+- `DiskSpaceWarning`: Node disk >80% full
+- `CertificateExpiringSoon`: TLS cert expires in &lt;14 days
+- `ArgocdAppOutOfSync`: Application diverged from Git
+
+### Audit Logs
+
+**Location**: `/var/lib/rancher/k3s/server/logs/audit.log` on master nodes
+
+**Query examples**:
+```bash
+# SSH to master node
+ssh oleksiyp@blade001
+
+# Recent API calls
+sudo tail -100 /var/lib/rancher/k3s/server/logs/audit.log | jq
+
+# Filter by user
+sudo cat /var/lib/rancher/k3s/server/logs/audit.log | jq 'select(.user.username == "oleksiy.pylypenko@gmail.com")'
+
+# Filter by resource type
+sudo cat /var/lib/rancher/k3s/server/logs/audit.log | jq 'select(.objectRef.resource == "secrets")'
+```
+
+## Troubleshooting
+
+### Pod Stuck in Pending
+
+**Symptoms**:
+```bash
+kubectl get pods
+NAME        READY   STATUS    RESTARTS   AGE
+my-app-xxx  0/1     Pending   0          5m
+```
+
+**Diagnosis**:
+```bash
+kubectl describe pod my-app-xxx
+# Look for events: "FailedScheduling", "Insufficient memory", "PodSecurityViolation"
+```
+
+**Common causes**:
+1. **Insufficient resources**: Node doesn't have enough CPU/memory
+   ```bash
+   kubectl top nodes
+   # Scale down other apps or add node
+   ```
+
+2. **Pod Security violation**: Pod violates PSA restricted policy
+   ```bash
+   # Check events for "violates PodSecurity"
+   # Add securityContext to pod spec
+   ```
+
+3. **PVC pending**: PersistentVolumeClaim not bound
+   ```bash
+   kubectl get pvc
+   # Check storage class, available PVs
+   ```
+
+### CrashLoopBackOff
+
+**Symptoms**:
+```bash
+kubectl get pods
+NAME        READY   STATUS             RESTARTS   AGE
+my-app-xxx  0/1     CrashLoopBackOff   5          3m
+```
+
+**Diagnosis**:
+```bash
+# Check logs
+kubectl logs my-app-xxx
+kubectl logs my-app-xxx --previous  # From crashed container
+
+# Check liveness/readiness probes
+kubectl describe pod my-app-xxx
+```
+
+**Common causes**:
+1. **Application error**: Startup crash, missing config
+2. **Liveness probe failure**: Probe failing too quickly
+3. **Missing dependencies**: Can't connect to database, etc.
+
+### Ingress Not Accessible
+
+**Symptoms**:
+```bash
+curl https://my-app.homelab.int.zengarden.space
+# Connection refused or timeout
+```
+
+**Diagnosis checklist**:
+```bash
+# 1. Check ingress exists
+kubectl get ingress -n default
+
+# 2. Verify ingress-nginx service has IP
+kubectl get svc -n ingress-nginx
+# Should show EXTERNAL-IP (MetalLB assigned)
+
+# 3. Check backend service exists
+kubectl get svc my-app -n default
+
+# 4. Verify DNS record
+dig my-app.homelab.int.zengarden.space
+# Should return MetalLB IP
+
+# 5. Check certificate
+kubectl get certificate my-app-tls -n default
+# Should show READY=True
+
+# 6. Test from pod
+kubectl run -it --rm debug --image=alpine/curl --restart=Never -- \
+  curl -v https://my-app.homelab.int.zengarden.space
+```
+
+### ArgoCD Application OutOfSync
+
+**Symptoms**:
+```bash
+kubectl get application my-app -n argocd
+NAME     SYNC STATUS   HEALTH STATUS
+my-app   OutOfSync     Healthy
+```
+
+**Diagnosis**:
+```bash
+# Check diff via CLI
+argocd app diff my-app
+
+# Or via UI
+open https://argocd.homelab.int.zengarden.space
+```
+
+**Resolutions**:
+1. **Manual change**: Someone used kubectl apply
+   ```bash
+   # Revert to Git state
+   argocd app sync my-app
+   ```
+
+2. **Git diverged**: Local changes not pushed
+   ```bash
+   cd manifests
+   git pull
+   git push
+   ```
+
+3. **Prune needed**: Resource exists but not in Git
+   ```bash
+   # ArgoCD will prune if prune: true in syncPolicy
+   argocd app sync my-app --prune
+   ```
+
+### Certificate Not Issuing
+
+**Symptoms**:
+```bash
+kubectl get certificate my-app-tls -n default
+NAME          READY   AGE
+my-app-tls    False   10m
+```
+
+**Diagnosis**:
+```bash
+# Check certificate
+kubectl describe certificate my-app-tls -n default
+
+# Check challenge (for DNS-01)
+kubectl get challenge -A
+
+# Check cert-manager logs
+kubectl logs -n cert-manager deployment/cert-manager
+```
+
+**Common causes**:
+1. **DNS challenge failing**: Cloudflare API token invalid
+   ```bash
+   kubectl get secret cloudflare-api-token -n cert-manager
+   # Verify token has DNS edit permissions
+   ```
+
+2. **Rate limit**: Hit Let's Encrypt rate limit
+   ```bash
+   # Wait 7 days or use staging issuer for testing
+   ```
+
+3. **DNS not propagated**: external-dns hasn't created record yet
+   ```bash
+   kubectl logs -n external-dns deployment/external-dns
+   dig _acme-challenge.my-app.homelab.int.zengarden.space TXT
+   ```
+
+## Disaster Recovery
+
+### Backup Strategy
+
+**What to backup**:
+1. **Git repositories**: Already backed up to GitHub (synced)
+2. **env.yaml files**: Store in password manager or encrypted location
+3. **Master password**: Critical for DerivedSecrets
+4. **K3s etcd**: For cluster state recovery
+5. **Persistent volumes**: Application data
+
+**Backup procedures**:
+
+**1. etcd backup**:
+```bash
+# On master node
+ssh oleksiyp@blade001
+sudo k3s etcd-snapshot save --name manual-backup-$(date +%Y%m%d)
+
+# List snapshots
+sudo k3s etcd-snapshot ls
+
+# Copy off-site
+sudo cp /var/lib/rancher/k3s/server/db/snapshots/manual-backup-*.zip /backup/location/
+```
+
+**2. PVC backup** (using Velero - optional):
+```bash
+# Install Velero
+helm install velero vmware-tanzu/velero -n velero --create-namespace
+
+# Backup namespace
+velero backup create my-app-backup --include-namespaces default
+
+# Restore
+velero restore create --from-backup my-app-backup
+```
+
+### Restore Procedures
+
+**Full cluster rebuild**:
+1. **Provision hardware**: CM5 blades, network, power
+2. **Partition NVMe**: `cd ansible/partition-nvme-drives && ./install.sh`
+3. **Install K3s**: `cd ansible/install-k3s && ./install.sh`
+4. **Restore env.yaml files**: From password manager to `helmfile/*/env.yaml`
+5. **Deploy infrastructure**: `cd helmfile && helmfile apply`
+6. **ArgoCD syncs applications**: Automatic from Git
+
+**Single application restore**:
+```bash
+# Delete application
+kubectl delete namespace my-app
+
+# ArgoCD recreates from Git
+argocd app sync my-app
+```
+
+**etcd restore** (disaster recovery):
+```bash
+# On master node
+ssh oleksiyp@blade001
+sudo k3s server \
+  --cluster-reset \
+  --cluster-reset-restore-path=/var/lib/rancher/k3s/server/db/snapshots/manual-backup-20240101.zip
+```
+
+## Best Practices
+
+### 1. Never use kubectl apply directly in production
+- ✅ Use ArgoCD (GitOps)
+- ❌ Manual kubectl apply
+- **Exception**: Debugging in non-production namespaces
+
+### 2. Always commit to Git before deploying
+- ✅ Git commit → Git push → ArgoCD sync
+- ❌ Local kubectl apply
+- **Why**: Audit trail, rollback capability
+
+### 3. Use DerivedSecrets for reproducible secrets
+- ✅ DerivedSecret CRD
+- ❌ kubectl create secret with random passwords
+- **Exception**: External API tokens that must match external systems
+
+### 4. Monitor resource usage before scaling
+- ✅ Check `kubectl top nodes` before adding workloads
+- ❌ Deploy and hope for the best
+- **Why**: Prevent node resource exhaustion
+
+### 5. Test rollbacks in non-production first
+- ✅ Verify git revert works
+- ❌ Assume rollback will work
+- **Why**: Confidence during incidents
+
+## Summary
+
+This operations guide provides:
+
+1. **Common tasks**: Deploy, update, scale, rollback applications
+2. **Monitoring**: Grafana dashboards, AlertManager, audit logs
+3. **Troubleshooting**: Diagnosis and resolution procedures
+4. **Disaster recovery**: Backup and restore strategies
+5. **Best practices**: GitOps-first, declarative configuration
+
+With these procedures, the homelab can be **operated confidently and recovered reliably**.

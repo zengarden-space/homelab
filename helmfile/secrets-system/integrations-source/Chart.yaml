@@ -1,0 +1,4 @@
+apiVersion: v2
+name: integrations-source
+description: ClusterSecretStore to access integrations namespace
+version: 1.0.0

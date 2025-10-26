@@ -46,7 +46,7 @@ spec:
             - --config
             - /etc/cloudflared/config/config.yaml
             - run
-            - {{ .Values.cloudflare.tunnelId | quote }}
+            - tunnel
           livenessProbe:
             httpGet:
               # Cloudflared has a /ready endpoint which returns 200 if and only if

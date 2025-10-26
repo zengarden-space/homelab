@@ -1,0 +1,71 @@
+# External integrations - Plain Kubernetes manifests
+# This file contains all external tokens, passwords, and credentials
+# Deploy with: kubectl apply -f integrations.yaml
+# This file should be .gitignored
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: integrations
+---
+# Secret for cert-manager (LetsEncrypt Cloudflare credentials)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cert-manager
+  namespace: integrations
+type: Opaque
+stringData:
+  cloudflareAccount: <CLOUDFLARE_ACCOUNT_EMAIL>
+  cloudflareToken: "<CLOUDFLARE_API_TOKEN>"
+---
+# Secret for external-dns (MikroTik credentials)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: external-dns
+  namespace: integrations
+type: Opaque
+stringData:
+  baseUrl: http://blade001.homelab.int.zengarden.space:555
+---
+# Secret for external-tunnel (Cloudflare Tunnel)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: external-tunnel
+  namespace: integrations
+type: Opaque
+stringData:
+  accountId: "<CLOUDFLARE_ACCOUNT_ID>"
+  tunnelId: "<CLOUDFLARE_TUNNEL_ID>"
+  tunnelSecret: "<CLOUDFLARE_TUNNEL_SECRET>"
+---
+# Secret for gitea (GitHub token for runners)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitea
+  namespace: integrations
+type: Opaque
+stringData:
+  # Permissions for https://github.com/zengarden-space
+  # Actions: Read and write, Contents: Read and write
+  # Metadata: Read-only, Workflows: Read and write
+  token: "<GITHUB_PAT_TOKEN>"
+  clientId: "<GOOGLE_OAUTH_CLIENT_ID>"
+  clientSecret: "<GOOGLE_OAUTH_CLIENT_SECRET>"
+---
+# Secret for ArgoCD Google OAuth
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd
+  namespace: integrations
+type: Opaque
+stringData:
+  # Google OAuth credentials for ArgoCD
+  # Create at: https://console.cloud.google.com/apis/credentials
+  # Authorized redirect URIs: https://argocd.homelab.int.zengarden.space/api/dex/callback
+  clientId: "<ARGOCD_GOOGLE_OAUTH_CLIENT_ID>"
+  clientSecret: "<ARGOCD_GOOGLE_OAUTH_CLIENT_SECRET>"

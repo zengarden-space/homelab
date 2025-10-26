@@ -59,8 +59,8 @@ releases:
           env:
             - name: GITEA__ACTIONS__ENABLED
               value: "true"
-            - name: GITEA__WEBHOOK_ALLOWED_HOST_LIST
-              value: "*"
+            - name: GITEA__WEBHOOK__ALLOWED_HOST_LIST
+              value: "argocd.homelab.int.zengarden.space"
         postgresql-ha:
           service:
             ports:

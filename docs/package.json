@@ -1,0 +1,30 @@
+{
+  "name": "homelab-platform-engineering-docs",
+  "version": "1.0.0",
+  "description": "Platform Engineering Documentation for Homelab",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "export": "next build && next export"
+  },
+  "keywords": [
+    "platform-engineering",
+    "kubernetes",
+    "homelab",
+    "documentation"
+  ],
+  "author": "Oleksiy Pylypenko",
+  "license": "MIT",
+  "dependencies": {
+    "next": "^16.0.0",
+    "nextra": "^4.6.0",
+    "nextra-theme-docs": "^4.6.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.1",
+    "@types/react": "19.2.2"
+  }
+}

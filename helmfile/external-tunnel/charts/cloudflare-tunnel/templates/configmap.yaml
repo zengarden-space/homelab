@@ -6,7 +6,7 @@ metadata:
 data:
   config.yaml: |
     # Name of the tunnel you want to run
-    tunnel: {{ .Values.cloudflare.tunnelName }}
+    tunnel: tunnel
     # The location of the secret containing the tunnel credentials
     credentials-file: /etc/cloudflared/creds/credentials.json
     # General purpose TCP routing for the network

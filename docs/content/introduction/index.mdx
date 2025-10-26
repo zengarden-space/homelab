@@ -1,0 +1,133 @@
+# Philosophy & Vision
+
+## Building a Platform Engineering Playground
+
+This homelab exists as a **continuously-running, production-grade playground** for platform engineering experimentation, learning, and demonstration. Unlike cloud environments with per-hour costs or development laptops that get shut down, this infrastructure provides:
+
+- **Always-on availability** for testing and iteration
+- **Minimal operational cost** through energy efficiency
+- **Real production patterns** without cloud vendor lock-in
+- **Complete control** over the entire stack from hardware to applications
+
+## The Problem Statement
+
+As a Principal DevOps Engineer, staying current with platform engineering practices requires hands-on experience with:
+
+- Kubernetes cluster operations at scale
+- GitOps workflows and deployment automation
+- Security hardening and compliance patterns
+- Infrastructure-as-code best practices
+- Custom operator development
+- Multi-environment orchestration
+
+**Cloud environments** are expensive for 24/7 operation and create vendor lock-in. **Local development** lacks the distributed nature of real clusters. **Work environments** are limited to specific tooling and can't be freely experimented with.
+
+## The Solution: Energy-Efficient Homelab
+
+This homelab bridges the gap by providing:
+
+### 1. Real Distributed Infrastructure
+- 5-node Kubernetes cluster with multi-master HA
+- True distributed etcd for state management
+- Real load balancing and ingress patterns
+- Actual network segmentation and policies
+
+### 2. Minimal Operating Cost
+- **Total power draw**: 28-40W (less than a laptop)
+- **Monthly electricity**: ~$3-5 at typical rates
+- **Initial investment**: ~$1000-1500 (one-time)
+- **Cloud equivalent**: $200-400/month for similar capabilities
+
+### 3. Complete Flexibility
+- Full control from BIOS to application layer
+- Experiment with breaking changes without fear
+- Learn from failures in a safe environment
+- Showcase expertise through real implementations
+
+## What Makes This Special
+
+### Production-Grade Patterns
+This isn't a hobby project—it implements enterprise patterns:
+- Pod Security Admissions (PSA) with restricted policies
+- OIDC authentication with Google Workspace
+- Comprehensive audit logging and metrics
+- Secret encryption and deterministic management
+- Network policies and segmentation
+- Automated certificate lifecycle management
+
+### GitOps-First Architecture
+Everything flows through Git:
+- Infrastructure defined in Helmfiles
+- Applications deployed via ArgoCD
+- Automated synchronization between GitHub and Gitea
+- CI/CD pipelines triggering on Git events
+- Declarative configuration with audit trails
+
+### Custom Automation
+Beyond off-the-shelf tools, this includes:
+- **DerivedSecret Operator**: Deterministic secret generation from master password using Argon2id
+- **Metabase CNPG Operator**: Automatic database discovery and connection management
+- **Gitea Automation**: GitHub organization synchronization and token management
+- **Restrictive HTTP Proxy**: Path-based security boundaries for internal services
+
+## Target Audience
+
+This documentation serves multiple purposes:
+
+### For Other Engineers
+Demonstrate technical depth in:
+- Kubernetes cluster architecture and operations
+- Security hardening and compliance
+- Infrastructure-as-code best practices
+- Custom operator development
+- GitOps workflow design
+
+### For Learning
+Provide reference implementations for:
+- Bare metal Kubernetes on ARM64
+- Cilium CNI with eBPF networking
+- Deterministic secret management
+- Multi-environment DNS and ingress
+- Self-hosted Git and CI/CD
+
+### For Collaboration
+Enable others to:
+- Understand the architecture through clear documentation
+- Replicate components for their own use
+- Contribute via VPN access (planned)
+- Learn from real production patterns
+
+## Investment Philosophy
+
+> "Initial investment matters not that much as a running cost that determines sustainability."
+
+### Capital Expenditure (One-Time)
+- **Compute**: 5x Raspberry Pi CM5 blades with NVMe
+- **Networking**: MikroTik router + PoE switches
+- **Total**: ~$1000-1500
+
+This is comparable to a single month of medium-sized cloud infrastructure but provides unlimited experimental time.
+
+### Operational Expenditure (Monthly)
+- **Power**: 40W × 24h × 30 days = 28.8 kWh/month
+- **Cost**: ~$3-5/month (at $0.12-0.18/kWh)
+- **Internet**: Existing home connection (no additional cost)
+
+### Return on Investment
+- **Learning value**: Hands-on experience with production patterns
+- **Career development**: Demonstrable expertise in platform engineering
+- **Reusability**: Infrastructure code applicable to real projects
+- **Flexibility**: Experiment without cloud bills
+
+## What's Next
+
+The following sections dive deep into:
+
+- [**Hardware Architecture**](/hardware) - Component selection and power efficiency
+- [**Network Design**](/networking) - VLANs, DNS, and security boundaries
+- [**Infrastructure Automation**](/infrastructure) - Ansible and K3s deployment
+- [**Core Components**](/core-components) - Platform services and integrations
+- [**Custom Operators**](/automation) - Bespoke automation and operators
+- [**GitOps Pipeline**](/gitops) - End-to-end deployment workflows
+
+Each section explains **why** decisions were made, **how** they're implemented, and **what** alternatives were considered.

@@ -198,6 +198,7 @@ EOF
 # Create organization secrets
 create_org_secret "PACKAGE_WRITE_TOKEN" "${PACKAGE_WRITE_TOKEN}"
 create_org_secret "CONTENT_WRITE_TOKEN" "${CONTENT_WRITE_TOKEN}"
+create_org_secret "EXTERNAL_GITHUB_COM_TOKEN" "${GITHUB_TOKEN}"
 
 # Function to get repositories from GitHub
 get_github_repos() {
