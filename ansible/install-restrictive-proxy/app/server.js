@@ -7,7 +7,7 @@ const yaml = require('js-yaml');
 const { Minimatch } = require('minimatch');
 const path = require('path');
 
-const CONFIG_PATH = process.env.CONFIG_PATH || '/etc/restrictive-proxy.conf';
+const CONFIG_PATH = process.env.CONFIG_PATH || '/etc/restrictive-proxy.conf.j2';
 const PORT = process.env.PORT || 8080;
 
 // Load configuration
@@ -19,9 +19,15 @@ function loadConfig() {
     // Replace password placeholders with environment variables
     if (config.proxy) {
       for (const [host, settings] of Object.entries(config.proxy)) {
+        // Replace passwords in 'to' section (for outgoing auth)
         if (settings.to && settings.to.password && settings.to.password.startsWith('${') && settings.to.password.endsWith('}')) {
           const envVar = settings.to.password.slice(2, -1);
           settings.to.password = process.env[envVar] || settings.to.password;
+        }
+        // Replace passwords in 'auth' section (for incoming auth)
+        if (settings.auth && settings.auth.password && settings.auth.password.startsWith('${') && settings.auth.password.endsWith('}')) {
+          const envVar = settings.auth.password.slice(2, -1);
+          settings.auth.password = process.env[envVar] || settings.auth.password;
         }
       }
     }
@@ -43,6 +49,20 @@ function matchesPattern(path, patterns) {
     const matcher = new Minimatch(pattern);
     return matcher.match(path);
   });
+}
+
+// Check basic auth credentials
+function checkBasicAuth(req, requiredUsername, requiredPassword) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
+    return false;
+  }
+
+  const base64Credentials = authHeader.split(' ')[1];
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
+  const [username, password] = credentials.split(':');
+
+  return username === requiredUsername && password === requiredPassword;
 }
 
 // Check if request is allowed
@@ -97,7 +117,20 @@ function startProxy() {
     }
 
     const { proxy, settings } = proxies[host];
-    const { to, mode = 'WATCH', restrictions } = settings;
+    const { to, mode = 'WATCH', restrictions, auth } = settings;
+
+    // Check basic auth if required
+    if (auth && auth.username && auth.password) {
+      if (!checkBasicAuth(req, auth.username, auth.password)) {
+        console.log(`UNAUTHORIZED request to ${host}`);
+        res.writeHead(401, {
+          'Content-Type': 'text/plain',
+          'WWW-Authenticate': 'Basic realm="Restrictive Proxy"'
+        });
+        res.end('Unauthorized');
+        return;
+      }
+    }
 
     const method = req.method;
     const urlPath = req.url.split('?')[0];

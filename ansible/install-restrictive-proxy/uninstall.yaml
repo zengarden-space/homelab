@@ -6,7 +6,7 @@
     app_dir: /opt/restrictive-proxy
     service_name: restrictive-proxy
     proxy_user: restrictive-proxy
-    config_path: /etc/restrictive-proxy.conf
+    config_path: /etc/restrictive-proxy.conf.j2
 
   tasks:
     - name: Stop and disable service

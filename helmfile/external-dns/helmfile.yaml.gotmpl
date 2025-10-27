@@ -12,10 +12,16 @@ repositories:
     url: https://kubernetes-sigs.github.io/external-dns/
 
 releases:
+  - name: external-dns-config
+    namespace: external-dns
+    chart: ./charts/external-dns-config
+
   - name: external-dns
     namespace: external-dns
     chart: external-dns/external-dns
     version: 1.15.0
+    needs:
+      - external-dns-config
     values:
       - interval: 5s
         sources:
@@ -54,11 +60,20 @@ releases:
               - name: MIKROTIK_DEFAULT_COMMENT
                 value: Managed by ExternalDNS
               - name: MIKROTIK_BASEURL
-                value: http://mikrotik-proxy.homelab.int.{{ .Values.domain }}:5555
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-proxy-credentials
+                    key: baseUrl
               - name: MIKROTIK_USERNAME
-                value: user
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-proxy-credentials
+                    key: username
               - name: MIKROTIK_PASSWORD
-                value: password
+                valueFrom:
+                  secretKeyRef:
+                    name: mikrotik-proxy-credentials
+                    key: password
             livenessProbe:
               httpGet:
                 path: /healthz
