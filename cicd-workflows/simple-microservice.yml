@@ -1,0 +1,372 @@
+name: Reusable CI/CD Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: 'Container registry URL'
+        required: false
+        type: string
+        default: 'gitea.homelab.int.zengarden.space'
+      helm-version:
+        description: 'Helm version to use'
+        required: false
+        type: string
+        default: '3.12.0'
+      helm-chart-path:
+        description: 'Path to Helm chart (defaults to ./helm/<repo-name>)'
+        required: false
+        type: string
+        default: ''
+      docker-context:
+        description: 'Docker build context'
+        required: false
+        type: string
+        default: '.'
+      trivy-version:
+        description: 'Trivy version to use'
+        required: false
+        type: string
+        default: 'v0.67.2'
+      trivy-severity:
+        description: 'Trivy severity levels to check'
+        required: false
+        type: string
+        default: 'CRITICAL,HIGH'
+      trivy-platform:
+        description: 'Platform for Trivy scan'
+        required: false
+        type: string
+        default: 'linux/arm64'
+      manifests-repo:
+        description: 'Repository for deployment manifests'
+        required: false
+        type: string
+        default: 'zengarden-space/manifests'
+      manifests-branch:
+        description: 'Branch for deployment manifests'
+        required: false
+        type: string
+        default: 'main'
+      dev-values-file:
+        description: 'Path to dev values file'
+        required: false
+        type: string
+        default: './helm/values-dev.yaml'
+      prod-values-file:
+        description: 'Path to prod values file'
+        required: false
+        type: string
+        default: './helm/values-prod.yaml'
+      dev-namespace-prefix:
+        description: 'Prefix for dev namespace'
+        required: false
+        type: string
+        default: 'dev-'
+      prod-namespace-prefix:
+        description: 'Prefix for prod namespace'
+        required: false
+        type: string
+        default: 'prod-'
+    secrets:
+      package-write-token:
+        description: 'Token for writing packages'
+        required: true
+      external-github-token:
+        description: 'Token for accessing external GitHub resources'
+        required: true
+      content-write-token:
+        description: 'Token for writing to manifests repository'
+        required: true
+    outputs:
+      image-tag:
+        description: 'The Docker image tag that was built'
+        value: ${{ jobs.build.outputs.image-tag }}
+
+env:
+  REGISTRY: ${{ inputs.registry }}
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.server_url == 'https://gitea.homelab.int.zengarden.space'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.extract-tag.outputs.tag }}
+      repo-name: ${{ steps.repo-name.outputs.name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract repository name
+        id: repo-name
+        shell: bash
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          echo "name=$repo_name" >> $GITHUB_OUTPUT
+          echo "Repository name: $repo_name"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Lint Helm chart
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          chart_path="${{ inputs.helm-chart-path }}"
+          if [ -z "$chart_path" ]; then
+            chart_path="./helm/$repo_name"
+          fi
+          helm lint "$chart_path"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.package-write-token }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.docker-context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract image tag
+        id: extract-tag
+        shell: bash
+        run: |
+          echo "${{ steps.meta.outputs.tags }}"
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | tail -n 1 | cut -d':' -f2)
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Extracted tag: $IMAGE_TAG"
+
+  trivy-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.server_url == 'https://gitea.homelab.int.zengarden.space'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          token: ${{ secrets.external-github-token }}
+          version: ${{ inputs.trivy-version }}
+          cache: true
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.package-write-token }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image-tag }}'
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: ${{ inputs.trivy-severity }}
+          skip-setup-trivy: true
+        env:
+          TRIVY_PLATFORM: ${{ inputs.trivy-platform }}
+
+  helm-template-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [build, trivy-scan]
+    if: github.ref == 'refs/heads/main' && github.server_url == 'https://gitea.homelab.int.zengarden.space'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Update Helm values (dev)
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
+          echo "Using tag: $IMAGE_TAG"
+          chart_path="${{ inputs.helm-chart-path }}"
+          if [ -z "$chart_path" ]; then
+            chart_path="./helm/$repo_name"
+          fi
+          helm template $repo_name "$chart_path" \
+            --namespace ${{ inputs.dev-namespace-prefix }}$repo_name \
+            --values ${{ inputs.dev-values-file }} \
+            --set image.tag=$IMAGE_TAG > manifest-dev.yaml
+
+      - name: Update Helm values (prod)
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
+          echo "Using tag: $IMAGE_TAG"
+          chart_path="${{ inputs.helm-chart-path }}"
+          if [ -z "$chart_path" ]; then
+            chart_path="./helm/$repo_name"
+          fi
+          helm template $repo_name "$chart_path" \
+            --namespace ${{ inputs.prod-namespace-prefix }}$repo_name \
+            --values ${{ inputs.prod-values-file }} \
+            --set image.tag=$IMAGE_TAG > manifest-prod.yaml
+
+      - name: Checkout manifests repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.manifests-repo }}
+          ref: ${{ inputs.manifests-branch }}
+          path: manifests
+          token: ${{ secrets.content-write-token }}
+
+      - name: Push changes to dev
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          cd manifests
+          git config --local user.name "Gitea Actions Bot"
+          git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+          # Retry loop for git operations
+          for attempt in {1..5}; do
+            echo "Attempt $attempt of 5"
+
+            # Pull latest changes
+            if ! git pull origin ${{ inputs.manifests-branch }}; then
+              echo "Failed to pull on attempt $attempt"
+              continue
+            fi
+
+            # Copy manifest and add files
+            mkdir -p ./manifests/${{ inputs.dev-namespace-prefix }}$repo_name
+            cp ../manifest-dev.yaml ./manifests/${{ inputs.dev-namespace-prefix }}$repo_name/manifest.yaml
+            git add .
+
+            # Check if there are changes to commit
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              break
+            fi
+
+            # Commit changes
+            if ! git commit -m "${{ github.repository }}: ${{ github.event.head_commit.message }} ${{github.sha}}"; then
+              echo "Failed to commit on attempt $attempt"
+              git reset --hard HEAD
+              continue
+            fi
+
+            # Try to push
+            if git push origin ${{ inputs.manifests-branch }}; then
+              echo "Successfully pushed on attempt $attempt"
+              break
+            else
+              echo "Failed to push on attempt $attempt, discarding commit"
+              git reset --hard HEAD~1
+
+              if [ $attempt -eq 5 ]; then
+                echo "Failed to push after 5 attempts"
+                exit 1
+              fi
+
+              sleep $((attempt * 2))  # Exponential backoff
+            fi
+          done
+
+      - name: Check for existing PR
+        id: check_pr
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          cd manifests
+
+          # Check if PR exists using Gitea API - fetch all open PRs and filter with jq
+          pr_exists=$(curl -s -H "Authorization: token ${{ secrets.content-write-token }}" \
+            "https://gitea.homelab.int.zengarden.space/api/v1/repos/${{ inputs.manifests-repo }}/pulls?state=open" \
+            | jq --arg branch "${{ inputs.prod-namespace-prefix }}$repo_name" '[.[] | select(.head.ref == $branch)] | length')
+
+          echo "pr_exists=$pr_exists" >> $GITHUB_OUTPUT
+          echo "Found $pr_exists existing PRs for branch ${{ inputs.prod-namespace-prefix }}$repo_name"
+
+      - name: Create production branch and push changes
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          cd manifests
+          git config --local user.name "Gitea Actions Bot"
+          git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+          # Create and switch to production branch
+          git checkout -B ${{ inputs.prod-namespace-prefix }}$repo_name
+
+          # Create directory and copy manifest
+          mkdir -p ./manifests/${{ inputs.prod-namespace-prefix }}$repo_name
+          cp ../manifest-prod.yaml ./manifests/${{ inputs.prod-namespace-prefix }}$repo_name/manifest.yaml
+          git add .
+
+          # Check if there are changes to commit
+          if ! git diff --cached --quiet; then
+            git commit -m "Deploy ${{ github.repository }} to production: ${{ github.event.head_commit.message }} ${{github.sha}}"
+            git push -f origin ${{ inputs.prod-namespace-prefix }}$repo_name
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_pr.outputs.pr_exists == '0'
+        run: |
+          repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
+          commit_msg=$(echo '${{ github.event.head_commit.message }}' | sed 's/"/\\"/g')
+
+          # Create PR using Gitea API
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${{ secrets.content-write-token }}" \
+            -H "Content-Type: application/json" \
+            "https://gitea.homelab.int.zengarden.space/api/v1/repos/${{ inputs.manifests-repo }}/pulls" \
+            -d @- <<EOF
+          {
+            "title": "Deploy $repo_name to production",
+            "body": "Auto-generated PR to deploy ${{ github.repository }} to production environment.\n\nCommit: ${{ github.sha }}\nMessage: ${commit_msg}",
+            "head": "${{ inputs.prod-namespace-prefix }}$repo_name",
+            "base": "${{ inputs.manifests-branch }}"
+          }
+          EOF
+          )
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "HTTP Status Code: $http_code"
+          echo "Response Body: $body"
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "Pull request created successfully"
+          else
+            echo "Failed to create pull request"
+            exit 1
+          fi

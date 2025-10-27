@@ -199,6 +199,7 @@ EOF
 create_org_secret "PACKAGE_WRITE_TOKEN" "${PACKAGE_WRITE_TOKEN}"
 create_org_secret "CONTENT_WRITE_TOKEN" "${CONTENT_WRITE_TOKEN}"
 create_org_secret "EXTERNAL_GITHUB_COM_TOKEN" "${GITHUB_TOKEN}"
+create_org_secret "ANTHROPIC_API_KEY" "${ANTHROPIC_API_KEY}"
 
 # Function to get repositories from GitHub
 get_github_repos() {

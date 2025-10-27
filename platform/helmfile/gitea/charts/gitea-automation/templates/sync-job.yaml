@@ -51,8 +51,13 @@ spec:
         - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:
-              name: {{ include "gitea-automation.fullname" . }}-github
+              name: {{ include "gitea-automation.fullname" . }}-integrations
               key: GITHUB_TOKEN
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "gitea-automation.fullname" . }}-integrations
+              key: ANTHROPIC_API_KEY
         - name: GITEA_TOKEN
           valueFrom:
             secretKeyRef:

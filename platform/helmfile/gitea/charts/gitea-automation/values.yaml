@@ -39,7 +39,6 @@ personalAccessTokens:
     gitea-automation-content-writer:
       user: admin
       scopes: "write:repository"
-      
 # Job configuration
 job:
   image:
