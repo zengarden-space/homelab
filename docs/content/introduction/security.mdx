@@ -387,6 +387,25 @@ containers:
 
 ### RBAC (Role-Based Access Control)
 
+**Four-tier privilege escalation model:**
+```
+Application Developer → Platform Operator → System Administrator → Cluster Admin
+```
+
+**Key Features:**
+- **Project-based isolation**: ArgoCD projects segregate applications, platform, and system components
+- **Namespace-based access**: Kubernetes RBAC restricts access to specific namespaces
+- **Least privilege**: Users get minimum permissions for their role
+- **Google OAuth**: Centralized authentication via Google accounts
+
+**Role Summary:**
+- **Application Developer**: View and sync apps, read logs, exec into pods (app namespaces only)
+- **Platform Operator**: Full app management, view platform services (no system access)
+- **System Administrator**: Manage infrastructure, operators, and all resources
+- **Cluster Admin**: Unrestricted access (break-glass only)
+
+For detailed RBAC policies, user assignment, and troubleshooting, see [RBAC Documentation](/operations/rbac).
+
 **Google OIDC Integration:**
 ```yaml
 kube-apiserver-arg:
@@ -394,38 +413,6 @@ kube-apiserver-arg:
   - "oidc-client-id=<google-client-id>.apps.googleusercontent.com"
   - "oidc-username-claim=email"
   - "oidc-groups-claim=groups"
-```
-
-**Admin RBAC:**
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: google-admin
-subjects:
-  - kind: User
-    name: oleksiy.pylypenko@gmail.com
-    apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: ClusterRole
-  name: cluster-admin
-  apiGroup: rbac.authorization.k8s.io
-```
-
-**Read-only RBAC (default):**
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: google-readonly
-subjects:
-  - kind: Group
-    name: system:authenticated
-    apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: ClusterRole
-  name: view
-  apiGroup: rbac.authorization.k8s.io
 ```
 
 ### Secrets Encryption at Rest

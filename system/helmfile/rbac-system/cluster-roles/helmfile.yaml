@@ -1,0 +1,9 @@
+helmDefaults:
+  wait: true
+  timeout: 600
+
+releases:
+  - name: platform-rbac
+    namespace: default
+    chart: ./manifests
+    values: []

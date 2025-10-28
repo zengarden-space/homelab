@@ -1,0 +1,96 @@
+---
+# Example: Platform Namespace
+# Platform operators will get access to these namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    zengarden.space/role: platform
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitea
+  labels:
+    zengarden.space/role: platform
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metabase
+  labels:
+    zengarden.space/role: platform
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: victoria-metrics
+  labels:
+    zengarden.space/role: platform
+
+---
+# Example: System Namespace
+# System admins will get access to these namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    zengarden.space/role: system
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    zengarden.space/role: system
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+  labels:
+    zengarden.space/role: system
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secrets-system
+  labels:
+    zengarden.space/role: system
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    zengarden.space/role: system
+
+---
+# Application Namespaces
+# These are discovered automatically from ArgoCD Applications
+# No label needed - the operator discovers them from ArgoCD
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homelab-docs
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-retroboard
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod-retroboard

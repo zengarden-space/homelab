@@ -1,0 +1,33 @@
+RBAC Operator has been installed!
+
+The operator will automatically create RoleBindings for users based on:
+- User CRDs (zengarden.space/v1)
+- ArgoCD Application namespaces
+- Namespace labels (zengarden.space/role)
+
+To create a user:
+
+kubectl apply -f - <<EOF
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: myuser
+spec:
+  email: user@example.com
+  roles:
+    - app-developer
+  enabled: true
+EOF
+
+To check operator status:
+
+kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "rbac-operator.name" . }}
+kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "rbac-operator.name" . }} -c rbac-service -f
+
+To list users:
+
+kubectl get users
+
+To check user status:
+
+kubectl get user myuser -o yaml

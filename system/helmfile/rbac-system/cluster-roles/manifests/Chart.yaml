@@ -1,0 +1,4 @@
+apiVersion: v2
+name: platform-rbac
+description: RBAC roles for platform operators and application developers
+version: 0.1.0

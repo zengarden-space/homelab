@@ -1,0 +1,740 @@
+# RBAC (Role-Based Access Control)
+
+## Overview
+
+The homelab implements a **four-tier privilege escalation model** for both ArgoCD and Kubernetes access control. This provides granular permissions while maintaining security through the principle of least privilege.
+
+## Role Hierarchy
+
+```
+Application Developer → Platform Operator → System Administrator → Cluster Admin
+```
+
+Each role has **minimum necessary permissions** with clear escalation paths for exceptional needs.
+
+## Namespace Organization
+
+### System Namespaces (Infrastructure)
+Managed by system administrators only:
+
+- `cert-manager` - TLS certificate management
+- `cnpg-system` - CloudNativePG operator
+- `external-dns` - DNS automation
+- `external-tunnel` - External connectivity
+- `ingress-nginx` - Ingress controller
+- `metallb-system` - Load balancer
+- `secrets-system` - External Secrets Operator
+- `cilium-secrets` - Cilium network policy secrets
+- `integrations` - External service integrations (1Password, OAuth, etc.)
+- `secrets` - Derived secrets storage
+- `kube-system`, `kube-public`, `kube-node-lease` - Kubernetes core
+
+### Platform Namespaces
+Managed by platform operators:
+
+- `argocd` - GitOps platform
+- `gitea` - Git repository
+- `metabase` - Analytics platform
+- `victoria-metrics` - Monitoring and metrics
+
+### Application Namespaces
+Managed by application developers:
+
+- `homelab-docs` - Documentation site
+- `dev-retroboard`, `dev-retroboard-api` - Development environment
+- `prod-retroboard`, `prod-retroboard-api` - Production environment
+- `temperature-monitor`, `temperature-monitor-api` - IoT monitoring
+- `secret-editor` - Secret management UI
+
+## ArgoCD RBAC
+
+### Projects
+
+#### `apps` Project
+**Purpose**: Application deployments managed by developers
+
+**Configuration**: `platform/helmfile/argocd/charts/argocd-config/templates/project-apps.yaml`
+
+**Allowed Namespaces:**
+- All application namespaces listed above
+- `secrets` namespace (for DerivedSecret CRDs only)
+
+**Allowed Resources:**
+- Core: Service, ConfigMap, Secret, ServiceAccount, PVC
+- Workloads: Deployment, StatefulSet, DaemonSet, Job, CronJob
+- Networking: Ingress, NetworkPolicy
+- Autoscaling: HorizontalPodAutoscaler
+- Policy: PodDisruptionBudget
+- **CRDs**: ExternalSecret, CNPG Cluster/Database, VMServiceScrape, DerivedSecret
+- **RBAC**: Role, RoleBinding (for job watchers)
+
+**Cluster Resources**: None (namespace-scoped only)
+
+**Source Repositories**: Internal Gitea only
+
+#### `default` Project
+**Purpose**: Platform and system components (not managed via ArgoCD projects)
+
+### Roles
+
+#### Application Developer (`role:app-developer`)
+
+**Permissions:**
+- ✅ View and sync applications in `apps` project
+- ✅ View logs and exec into pods
+- ✅ Perform application actions (restart, rollback)
+- ✅ Override sync parameters (for debugging)
+
+**Restrictions:**
+- ❌ Cannot create or delete applications
+- ❌ Cannot access `default` project (platform/system apps)
+- ❌ Cannot modify ArgoCD configuration
+
+**Use Case**: Day-to-day application development, debugging, and deployments
+
+**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 85-101
+
+```yaml
+# Can work with apps in the 'apps' project only
+p, role:app-developer, applications, get, apps/*, allow
+p, role:app-developer, applications, sync, apps/*, allow
+p, role:app-developer, applications, override, apps/*, allow
+p, role:app-developer, applications, action/*, apps/*, allow
+p, role:app-developer, logs, get, apps/*, allow
+p, role:app-developer, exec, create, apps/*, allow
+
+# Cannot create/delete applications
+p, role:app-developer, applications, create, *, deny
+p, role:app-developer, applications, delete, *, deny
+
+# Cannot access default project (platform/system apps)
+p, role:app-developer, applications, *, default/*, deny
+```
+
+#### Platform Operator (`role:platform-operator`)
+
+**Permissions:**
+- ✅ All Application Developer permissions
+- ✅ Full management of `apps` project applications
+- ✅ Create and delete applications in `apps` project
+- ✅ View `default` project applications (read-only)
+- ✅ Manage ArgoCD projects and repositories
+- ✅ View and troubleshoot platform services
+
+**Restrictions:**
+- ❌ Cannot sync or delete `default` project apps
+- ❌ Cannot delete critical projects (`default`, `apps`)
+- ❌ Limited cluster-level access
+
+**Use Case**: Managing application lifecycle, onboarding new services, platform troubleshooting
+
+**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 103-126
+
+```yaml
+# Full access to apps project
+p, role:platform-operator, applications, *, apps/*, allow
+p, role:platform-operator, logs, get, */*, allow
+p, role:platform-operator, exec, create, */*, allow
+
+# Can view default project apps (but not modify)
+p, role:platform-operator, applications, get, default/*, allow
+p, role:platform-operator, applications, sync, default/*, deny
+p, role:platform-operator, applications, delete, default/*, deny
+
+# Can manage projects and repositories
+p, role:platform-operator, projects, get, *, allow
+p, role:platform-operator, projects, create, *, allow
+p, role:platform-operator, projects, update, *, allow
+p, role:platform-operator, repositories, get, *, allow
+p, role:platform-operator, repositories, create, *, allow
+p, role:platform-operator, repositories, update, *, allow
+
+# Cannot delete critical projects
+p, role:platform-operator, projects, delete, default, deny
+p, role:platform-operator, projects, delete, apps, deny
+```
+
+#### System Administrator (`role:system-admin`)
+
+**Permissions:**
+- ✅ Full access to all ArgoCD projects
+- ✅ Manage all applications including platform/system
+- ✅ Manage ArgoCD configuration (projects, repos, certificates, GPG keys)
+- ✅ Account management
+
+**Restrictions:**
+- ❌ Cannot delete Kubernetes clusters from ArgoCD
+
+**Use Case**: Infrastructure management, system upgrades, security patching
+
+**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 128-143
+
+```yaml
+# Full access to all projects and ArgoCD management
+p, role:system-admin, applications, *, */*, allow
+p, role:system-admin, logs, *, */*, allow
+p, role:system-admin, exec, *, */*, allow
+p, role:system-admin, projects, *, *, allow
+p, role:system-admin, repositories, *, *, allow
+p, role:system-admin, certificates, *, *, allow
+p, role:system-admin, gpgkeys, *, *, allow
+p, role:system-admin, accounts, get, *, allow
+p, role:system-admin, accounts, update, *, allow
+
+# Cannot delete clusters
+p, role:system-admin, clusters, delete, *, deny
+```
+
+#### Cluster Admin (`role:cluster-admin`)
+
+**Permissions:**
+- ✅ Unrestricted access to everything in ArgoCD
+
+**Restrictions**: None
+
+**Use Case**: Break-glass only, emergency access, should be audited
+
+**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 145-149
+
+```yaml
+# Break-glass full access
+p, role:cluster-admin, *, *, *, allow
+```
+
+## Kubernetes RBAC
+
+### ClusterRoles
+
+#### `homelab:app-developer`
+
+**Scope**: Application namespaces only (via RoleBindings)
+
+**Permissions:**
+- Read pods, logs, events
+- Exec into pods for debugging
+- Read deployments, services, configmaps, secrets
+- Read ingresses, jobs, cronjobs, HPA
+
+**Restrictions:**
+- No write access to any resources (GitOps only)
+- No access to platform or system namespaces
+
+**Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-app-developer.yaml`
+
+**Assigned Namespaces** (via RoleBindings):
+- `homelab-docs`
+- `dev-retroboard`, `dev-retroboard-api`
+- `prod-retroboard`, `prod-retroboard-api`
+- `temperature-monitor`, `temperature-monitor-api`
+- `secret-editor`
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab:app-developer
+rules:
+  # View and debug pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/status"]
+    verbs: ["get", "list", "watch"]
+
+  # Exec into pods for debugging
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+
+  # View deployments, services, configmaps
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "configmaps"]
+    verbs: ["get", "list", "watch"]
+
+  # View secrets (read-only, for troubleshooting)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+```
+
+#### `homelab:platform-operator`
+
+**Scope**: Application + Platform namespaces (via RoleBindings)
+
+**Permissions:**
+- Full CRUD on application workloads (Deployments, StatefulSets, etc.)
+- Full CRUD on services, configmaps, ingresses
+- Read-only access to secrets (write via secret-editor tool only)
+- Manage ArgoCD Applications and AppProjects
+- View CRDs and cluster resources
+
+**Restrictions:**
+- Cannot write secrets directly (use secret-editor tool)
+- Cannot modify system namespaces
+- Limited cluster-level access
+
+**Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-platform-operator.yaml`
+
+**Assigned Namespaces** (via RoleBindings):
+- All application namespaces
+- All platform namespaces (`argocd`, `gitea`, `metabase`, `victoria-metrics`)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab:platform-operator
+rules:
+  # Full access to application resources (excluding secrets write)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["*"]
+
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/status", "pods/exec"]
+    verbs: ["*"]
+
+  # Read secrets, limited write via secret-editor only
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # Can manage ArgoCD Applications
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications", "applicationsets", "appprojects"]
+    verbs: ["*"]
+```
+
+#### `homelab:system-admin`
+
+**Scope**: Cluster-wide (ClusterRoleBinding)
+
+**Permissions:**
+- Full access to all namespaced resources
+- Manage CRDs, ClusterRoles (limited), namespaces, nodes
+- Full access to operator CRDs (cert-manager, ESO, CNPG, MetalLB, Cilium)
+- Full access to `integrations` namespace (external credentials)
+
+**Restrictions:**
+- Cannot delete critical ClusterRoles or ClusterRoleBindings
+
+**Configuration**: `system/helmfile/rbac/manifests/templates/rbac-system-admin.yaml`
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab:system-admin
+rules:
+  # Full access to all namespaced resources
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # Cert-manager resources
+  - apiGroups: ["cert-manager.io"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # External Secrets Operator
+  - apiGroups: ["external-secrets.io"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # CNPG (CloudNativePG)
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # MetalLB
+  - apiGroups: ["metallb.io"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # Cilium Network Policies
+  - apiGroups: ["cilium.io"]
+    resources: ["*"]
+    verbs: ["*"]
+```
+
+#### `homelab:cluster-admin`
+
+**Scope**: Cluster-wide (ClusterRoleBinding)
+
+**Permissions:**
+- Unrestricted access to everything
+- Non-resource URLs (API server endpoints)
+
+**Restrictions**: None (break-glass role)
+
+**Configuration**: `system/helmfile/rbac/manifests/templates/rbac-cluster-admin.yaml`
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab:cluster-admin
+  labels:
+    rbac.homelab/break-glass: "true"
+rules:
+  # Unrestricted access to everything
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # Non-resource URLs (API server endpoints)
+  - nonResourceURLs: ["*"]
+    verbs: ["*"]
+```
+
+## Secret Access Strategy
+
+### `integrations` Namespace
+**Purpose**: External service credentials (1Password, Google OAuth, Cloudflare API tokens)
+
+**Access Control:**
+- **Application Developer**: No access
+- **Platform Operator**: Read-only (for troubleshooting)
+- **System Administrator**: Full access
+- **Cluster Admin**: Full access
+
+### `secrets` Namespace
+**Purpose**: Derived secrets for applications (DerivedSecrets operator)
+
+**Access Control:**
+- **Applications**: Via ServiceAccounts only
+- **Application Developer**: No direct access (view via ArgoCD)
+- **Platform Operator**: Read-only
+- **System Administrator**: Full access
+- **Human users**: Via `secret-editor` tool only
+
+### Application Namespaces
+**Purpose**: Application-specific secrets (database credentials, API keys)
+
+**Access Control:**
+- **Application Developer**: Read-only (for troubleshooting)
+- **Platform Operator**: Read-only (write via secret-editor)
+- **System Administrator**: Full access
+
+## User Assignment
+
+### ArgoCD Role Assignment
+
+Edit `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 154-159:
+
+```yaml
+# Role Assignments
+g, oleksiy.pylypenko@gmail.com, role:cluster-admin
+
+# Example assignments:
+# g, developer@example.com, role:app-developer
+# g, platformeng@example.com, role:platform-operator
+# g, sysadmin@example.com, role:system-admin
+```
+
+### Kubernetes Role Assignment
+
+**Recommended: Use RBAC Operator**
+
+The RBAC Operator automates RoleBinding creation based on User CRDs. See [RBAC Operator](/operations/rbac-operator) for details.
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: john-doe
+spec:
+  email: john.doe@example.com
+  roles:
+    - app-developer
+  enabled: true
+```
+
+This automatically creates RoleBindings in appropriate namespaces.
+
+**Alternative: Manual Assignment (Legacy)**
+
+Edit the respective RBAC YAML files and add users/groups to the `subjects` field:
+
+**ClusterRoles**:
+- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-app-developer.yaml`
+- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-platform-operator.yaml`
+
+**System Roles**:
+- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-system-admin.yaml`
+- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-cluster-admin.yaml`
+
+Example:
+```yaml
+subjects:
+  - kind: User
+    name: developer@example.com
+  - kind: Group
+    name: developers
+```
+
+**Note:** Manual RoleBindings should be migrated to the RBAC Operator for automated management.
+
+## Deployment
+
+### Deploy RBAC Configuration
+
+```bash
+# 1. Deploy platform components (includes ArgoCD + platform RBAC)
+cd /Users/oleksiyp/dev/homelab/platform/helmfile
+helmfile sync
+
+# 2. Deploy system components (includes system RBAC)
+cd /Users/oleksiyp/dev/homelab/system/helmfile
+helmfile sync
+```
+
+### Move Existing Apps to `apps` Project
+
+```bash
+# Move each application to the apps project
+argocd app set hemelab.dev.retroboard --project apps --grpc-web
+argocd app set hemelab.dev.retroboard-api --project apps --grpc-web
+argocd app set hemelab.prod.retroboard --project apps --grpc-web
+argocd app set hemelab.prod.retroboard-api --project apps --grpc-web
+
+# Verify project assignment
+argocd app list --grpc-web
+```
+
+## Verification
+
+### Verify ArgoCD Projects
+
+```bash
+# List all projects
+argocd proj list --grpc-web
+
+# Get apps project details
+argocd proj get apps --grpc-web
+
+# List applications by project
+argocd app list --project apps --grpc-web
+```
+
+### Verify ArgoCD RBAC
+
+```bash
+# Test permissions as different roles
+argocd account can-i sync applications 'apps/*'
+argocd account can-i delete applications 'default/*'
+argocd account can-i create projects '*'
+```
+
+### Verify Kubernetes RBAC
+
+```bash
+# Check ClusterRoles
+kubectl get clusterroles | grep homelab
+
+# Check RoleBindings in application namespaces
+kubectl get rolebindings -A | grep homelab
+
+# Test permissions (as specific user via impersonation)
+kubectl auth can-i get pods -n dev-retroboard --as=developer@example.com
+kubectl auth can-i delete secrets -n integrations --as=platformeng@example.com
+kubectl auth can-i create clusterroles --as=sysadmin@example.com
+```
+
+## Best Practices
+
+### Principle of Least Privilege
+Users should be assigned the **minimum role** needed for their daily work. Escalation should be temporary and audited.
+
+### GitOps First
+All changes should go through Git commits and ArgoCD sync. Direct `kubectl` access is for emergencies and debugging only.
+
+### Secret Segregation
+- Never commit secrets to Git
+- Use External Secrets Operator for external credentials
+- Use DerivedSecrets for application secrets
+- Access secrets via `secret-editor` tool, not direct kubectl
+
+### Regular Audits
+Review role assignments and permissions quarterly:
+- Are users still in the appropriate role?
+- Are there unused service accounts?
+- Are RBAC policies still aligned with responsibilities?
+
+### Break-glass Process
+Cluster Admin access should be:
+- Time-limited (request → approve → revoke)
+- Audited (all actions logged)
+- Justified (documented reason for escalation)
+
+## Troubleshooting
+
+### "Permission Denied" in ArgoCD
+
+**Check:**
+1. User's role assignment in `helmfile.yaml.gotmpl` line 154
+2. Application's project assignment (`argocd app get <app> --grpc-web`)
+3. RBAC policy rules for the role (lines 85-149)
+
+**Debug:**
+```bash
+# Check current user
+argocd account get-user-info --grpc-web
+
+# Check what user can do
+argocd account can-i sync applications 'apps/*' --grpc-web
+```
+
+### "Forbidden" in kubectl
+
+**Check:**
+1. RoleBinding exists in the target namespace
+2. User is in the subjects list
+3. ClusterRole has the required permissions
+
+**Debug:**
+```bash
+# Check if user can perform action
+kubectl auth can-i get pods -n dev-retroboard --as=user@example.com
+
+# List user's permissions
+kubectl auth can-i --list --as=user@example.com
+
+# Describe RoleBinding
+kubectl describe rolebinding homelab:app-developer -n dev-retroboard
+```
+
+### Applications Not Syncing
+
+**Check:**
+1. Application is in the correct project (`argocd app get <app>`)
+2. Project allows the destination namespace
+3. Project allows the source repository
+4. User has sync permission for that project
+
+**Debug:**
+```bash
+# Get application details
+argocd app get hemelab.dev.retroboard --grpc-web
+
+# Get project details
+argocd proj get apps --grpc-web
+
+# Check sync errors
+argocd app sync hemelab.dev.retroboard --dry-run --grpc-web
+```
+
+### Project Namespace Not Allowed
+
+**Error**: `application destination spec is not permitted in project`
+
+**Solution**: Add namespace to project destinations in `project-apps.yaml`:
+
+```yaml
+destinations:
+  - namespace: new-app-namespace
+    server: {{ .Values.application.destinationServer }}
+```
+
+Then redeploy:
+```bash
+cd /Users/oleksiyp/dev/homelab/platform/helmfile/argocd
+helmfile sync
+```
+
+## Security Considerations
+
+### RBAC Is Part of Defense-in-Depth
+
+RBAC is **Layer 5** in the homelab's security model (see [Security](/introduction/security)). It works together with:
+
+- **Layer 1**: Network segmentation (firewall)
+- **Layer 2**: Cluster network (Cilium, eBPF)
+- **Layer 3**: Ingress security (TLS, WAF)
+- **Layer 4**: Network policies (pod-to-pod restrictions)
+- **Layer 5**: **RBAC** (user permissions)
+- **Layer 6**: Application security (non-root containers)
+- **Layer 7**: Audit & monitoring (logging, alerting)
+
+### Audit Logging
+
+All RBAC decisions are logged to Kubernetes audit logs:
+
+```yaml
+# What's logged:
+# - Who (user, service account)
+# - What (resource, verb)
+# - When (timestamp)
+# - Result (allowed, denied)
+```
+
+Review audit logs regularly:
+```bash
+# Find denied requests
+kubectl logs -n kube-system -l component=kube-apiserver | grep 'Forbidden'
+
+# Find specific user's actions
+kubectl logs -n kube-system -l component=kube-apiserver | grep 'user@example.com'
+```
+
+### Google OAuth Integration
+
+Users authenticate via Google OAuth (configured in K3s):
+
+```yaml
+kube-apiserver-arg:
+  - "oidc-issuer-url=https://accounts.google.com"
+  - "oidc-client-id=<google-client-id>.apps.googleusercontent.com"
+  - "oidc-username-claim=email"
+  - "oidc-groups-claim=groups"
+```
+
+ArgoCD also uses Google OAuth (configured in `helmfile.yaml.gotmpl`):
+
+```yaml
+dex.config: |
+  connectors:
+    - type: google
+      id: google
+      name: Google
+      config:
+        clientID: $argocd-google-oauth:clientId
+        clientSecret: $argocd-google-oauth:clientSecret
+```
+
+## RBAC Automation
+
+For automated RoleBinding management, see [RBAC Operator](/operations/rbac-operator).
+
+The RBAC Operator:
+- Automatically creates RoleBindings based on User CRDs
+- Discovers namespaces from ArgoCD Applications
+- Eliminates manual RoleBinding configuration
+- Provides single source of truth for user access
+
+## Related Documentation
+
+- [RBAC Operator](/operations/rbac-operator) - Automated RoleBinding management
+- [Security](/introduction/security) - Full security architecture
+- [Deployment](/deployment) - Initial setup instructions
+- [Monitoring](/operations/monitoring) - Security event detection
+- [Maintenance](/operations/maintenance) - Regular RBAC audits
+
+## Conclusion
+
+This RBAC implementation provides:
+
+1. **Granular permissions** via four-tier role model
+2. **Namespace-based segregation** (apps, platform, system)
+3. **Project-based isolation** in ArgoCD
+4. **Secret access control** (read-only for developers, restricted write)
+5. **Audit trail** for all access decisions
+6. **Break-glass access** for emergencies
+
+RBAC is **layered with other security controls** to provide defense-in-depth protection for the homelab infrastructure.
+
+---
+
+*RBAC is not just about permissions—it's about accountability, auditability, and limiting blast radius.*

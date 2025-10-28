@@ -1,0 +1,121 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: Application namespaces managed by developers
+
+  # Source repositories
+  sourceRepos:
+    - {{ .Values.application.git.repoURL }}
+
+  # Allowed destinations
+  destinations:
+    # Application namespaces
+    - namespace: homelab-docs
+      server: {{ .Values.application.destinationServer }}
+    - namespace: dev-retroboard
+      server: {{ .Values.application.destinationServer }}
+    - namespace: dev-retroboard-api
+      server: {{ .Values.application.destinationServer }}
+    - namespace: prod-retroboard
+      server: {{ .Values.application.destinationServer }}
+    - namespace: prod-retroboard-api
+      server: {{ .Values.application.destinationServer }}
+    - namespace: temperature-monitor
+      server: {{ .Values.application.destinationServer }}
+    - namespace: temperature-monitor-api
+      server: {{ .Values.application.destinationServer }}
+    - namespace: secret-editor
+      server: {{ .Values.application.destinationServer }}
+
+    # Secrets namespace (for DerivedSecret CRDs)
+    - namespace: secrets
+      server: {{ .Values.application.destinationServer }}
+
+  # Cluster resource whitelist (namespace-scoped resources only)
+  clusterResourceWhitelist: []
+
+  # Namespace resource whitelist (allow resources actually used by apps)
+  namespaceResourceWhitelist:
+    # Core resources
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: Secret
+    - group: ''
+      kind: ServiceAccount
+    - group: ''
+      kind: PersistentVolumeClaim
+
+    # Workload resources
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: apps
+      kind: DaemonSet
+    - group: batch
+      kind: Job
+    - group: batch
+      kind: CronJob
+
+    # Networking
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+
+    # Autoscaling and policies
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+
+    # External Secrets Operator
+    - group: external-secrets.io
+      kind: ExternalSecret
+    - group: external-secrets.io
+      kind: SecretStore
+    - group: external-secrets.io
+      kind: ClusterSecretStore
+
+    # CloudNativePG (CNPG)
+    - group: postgresql.cnpg.io
+      kind: Cluster
+    - group: postgresql.cnpg.io
+      kind: Database
+    - group: postgresql.cnpg.io
+      kind: Backup
+    - group: postgresql.cnpg.io
+      kind: ScheduledBackup
+    - group: postgresql.cnpg.io
+      kind: Pooler
+
+    # Victoria Metrics
+    - group: operator.victoriametrics.com
+      kind: VMServiceScrape
+    - group: operator.victoriametrics.com
+      kind: VMPodScrape
+    - group: operator.victoriametrics.com
+      kind: VMRule
+
+    # Custom homelab CRDs
+    - group: zengarden.space
+      kind: DerivedSecret
+
+    # RBAC (for job watchers, etc.)
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+
+  # Sync windows (optional - can restrict when syncs happen)
+  # syncWindows: []
+
+  # Orphaned resources monitoring
+  orphanedResources:
+    warn: true

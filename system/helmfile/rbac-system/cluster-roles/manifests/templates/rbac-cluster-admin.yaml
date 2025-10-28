@@ -1,0 +1,41 @@
+---
+# ClusterRole for Cluster Administrators
+# Break-glass role with unrestricted access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab:cluster-admin
+  labels:
+    rbac.homelab/role: cluster-admin
+    rbac.homelab/break-glass: "true"
+rules:
+  # Unrestricted access to everything
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+
+  # Non-resource URLs (API server endpoints)
+  - nonResourceURLs: ["*"]
+    verbs: ["*"]
+
+---
+# ClusterRoleBinding for Cluster Administrators
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: homelab:cluster-admin
+  labels:
+    rbac.homelab/role: cluster-admin
+    rbac.homelab/break-glass: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homelab:cluster-admin
+subjects:
+  # Your account gets cluster-admin
+  - kind: User
+    name: oleksiy.pylypenko@gmail.com
+
+  # Example: emergency break-glass group
+  # - kind: Group
+  #   name: cluster-admins

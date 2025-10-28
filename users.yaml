@@ -1,0 +1,21 @@
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: oleksiyp
+spec:
+  email: oleksiy.pylypenko@gmail.com
+  roles:
+    - app-developer
+    - platform-operator
+    - system-admin
+  enabled: true
+---
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: pawelp
+spec:
+  email: pawel.pomorski@gmail.com
+  roles:
+    - app-developer
+  enabled: true

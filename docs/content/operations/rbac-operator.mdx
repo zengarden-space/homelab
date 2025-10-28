@@ -1,0 +1,570 @@
+# RBAC Operator
+
+## Overview
+
+The RBAC Operator automates RoleBinding management based on User CRDs, eliminating manual configuration and ensuring consistent access control across the cluster.
+
+**Key Benefits:**
+- **Automated**: RoleBindings created automatically when users are added
+- **Dynamic**: Discovers namespaces from ArgoCD Applications
+- **Consistent**: Single source of truth for user role assignments
+- **Scalable**: Handles adding/removing applications without manual intervention
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User CRD                             │
+│  apiVersion: zengarden.space/v1                             │
+│  kind: User                                                 │
+│  spec:                                                      │
+│    email: user@example.com                                  │
+│    roles: [app-developer, platform-operator, system-admin]  │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   RBAC Operator                             │
+│  (StatefulSet in rbac-system namespace)                     │
+│  ┌────────────────┐  ┌─────────────────────────────┐       │
+│  │ Shell-Operator │  │ Python Service              │       │
+│  │ - Watches:     │◄─┤ - Discovers namespaces      │       │
+│  │   • Users      │  │ - Creates RoleBindings      │       │
+│  │   • Apps       │  │ - Updates User status       │       │
+│  │   • Namespaces │  │ - Reconciles every 5 min    │       │
+│  └────────────────┘  └─────────────────────────────┘       │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+        ┌─────────────┼─────────────┐
+        │             │             │
+        ▼             ▼             ▼
+┌──────────────┐ ┌────────────┐ ┌─────────────┐
+│ Application  │ │ Platform   │ │ System      │
+│ Namespaces   │ │ Namespaces │ │ Namespaces  │
+│ (from ArgoCD)│ │ (labeled)  │ │ (labeled)   │
+└──────────────┘ └────────────┘ └─────────────┘
+```
+
+## How It Works
+
+### 1. Namespace Discovery
+
+The operator discovers three types of namespaces:
+
+#### Application Namespaces
+Automatically discovered from ArgoCD Application resources:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  destination:
+    namespace: my-app-namespace  # ← Operator discovers this
+```
+
+#### Platform Namespaces
+Labeled with `zengarden.space/role=platform`:
+
+```bash
+kubectl label namespace argocd zengarden.space/role=platform
+kubectl label namespace gitea zengarden.space/role=platform
+kubectl label namespace metabase zengarden.space/role=platform
+kubectl label namespace victoria-metrics zengarden.space/role=platform
+```
+
+#### System Namespaces
+Labeled with `zengarden.space/role=system`:
+
+```bash
+kubectl label namespace cert-manager zengarden.space/role=system
+kubectl label namespace secrets-system zengarden.space/role=system
+kubectl label namespace metallb-system zengarden.space/role=system
+kubectl label namespace ingress-nginx zengarden.space/role=system
+# ... etc
+```
+
+### 2. Role Mapping
+
+| Role | Target Namespaces | ClusterRole Binding |
+|------|------------------|---------------------|
+| `app-developer` | Application only | `homelab:app-developer` |
+| `platform-operator` | Application + Platform | `homelab:platform-operator` |
+| `system-admin` | Application + Platform + System | `homelab:system-admin` |
+
+### 3. RoleBinding Creation
+
+For each user and role combination, the operator creates RoleBindings:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: homelab:app-developer:john-doe
+  namespace: dev-retroboard
+  labels:
+    app.kubernetes.io/managed-by: rbac-operator
+    rbac.homelab/role: app-developer
+    rbac.homelab/user: john-doe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homelab:app-developer
+subjects:
+  - kind: User
+    name: john.doe@example.com
+    apiGroup: rbac.authorization.k8s.io
+```
+
+### 4. Reconciliation
+
+The operator:
+- Responds to User/Application/Namespace changes **immediately**
+- Runs full reconciliation **every 5 minutes**
+- Updates User status with created RoleBindings
+
+## User CRD
+
+### Creating a User
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: john-doe
+spec:
+  email: john.doe@example.com  # Must match OIDC email
+  roles:
+    - app-developer
+  enabled: true
+```
+
+Apply the User:
+
+```bash
+kubectl apply -f user.yaml
+```
+
+### User with Multiple Roles
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: platform-admin
+spec:
+  email: admin@example.com
+  roles:
+    - platform-operator
+    - system-admin
+  enabled: true
+```
+
+This creates RoleBindings in:
+- Application namespaces (platform-operator)
+- Platform namespaces (platform-operator)
+- System namespaces (system-admin)
+
+### Disabling a User
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: john-doe
+spec:
+  email: john.doe@example.com
+  roles:
+    - app-developer
+  enabled: false  # User disabled
+```
+
+Or via kubectl:
+
+```bash
+kubectl patch user john-doe --type=merge -p '{"spec":{"enabled":false}}'
+```
+
+## Deployment
+
+### Prerequisites
+
+1. **Platform RBAC deployed** (defines `homelab:app-developer` and `homelab:platform-operator`)
+2. **ArgoCD installed** (for application namespace discovery)
+3. **Namespaces labeled** (for platform/system classification)
+
+### Deploy the Operator
+
+The operator is deployed automatically with system components:
+
+```bash
+cd ~/dev/homelab/system/helmfile
+helmfile sync
+```
+
+This deploys:
+1. User CRD (`users.zengarden.space`)
+2. Static RBAC (ClusterRoles for system-admin, cluster-admin)
+3. RBAC Operator (StatefulSet in `rbac-system` namespace)
+
+### Label Namespaces
+
+```bash
+# Platform namespaces
+kubectl label namespace argocd zengarden.space/role=platform
+kubectl label namespace gitea zengarden.space/role=platform
+kubectl label namespace metabase zengarden.space/role=platform
+kubectl label namespace victoria-metrics zengarden.space/role=platform
+
+# System namespaces
+kubectl label namespace cert-manager zengarden.space/role=system
+kubectl label namespace secrets-system zengarden.space/role=system
+kubectl label namespace metallb-system zengarden.space/role=system
+kubectl label namespace ingress-nginx zengarden.space/role=system
+kubectl label namespace external-dns zengarden.space/role=system
+kubectl label namespace external-tunnel zengarden.space/role=system
+kubectl label namespace cnpg-system zengarden.space/role=system
+kubectl label namespace cilium-secrets zengarden.space/role=system
+kubectl label namespace integrations zengarden.space/role=system
+kubectl label namespace secrets zengarden.space/role=system
+```
+
+## Usage
+
+### Managing Users
+
+**List all users:**
+```bash
+kubectl get users
+```
+
+**Get user details:**
+```bash
+kubectl get user john-doe -o yaml
+```
+
+**Check user status:**
+```bash
+kubectl get user john-doe -o jsonpath='{.status.conditions[*].message}'
+# Output: Successfully created 8 RoleBindings
+```
+
+**Edit user roles:**
+```bash
+kubectl edit user john-doe
+```
+
+**Delete user:**
+```bash
+kubectl delete user john-doe
+```
+
+### Viewing RoleBindings
+
+**List all operator-managed RoleBindings:**
+```bash
+kubectl get rolebindings -A -l app.kubernetes.io/managed-by=rbac-operator
+```
+
+**Check RoleBindings for a specific user:**
+```bash
+kubectl get rolebindings -A -l rbac.homelab/user=john-doe
+```
+
+**Describe RoleBinding:**
+```bash
+kubectl describe rolebinding homelab:app-developer:john-doe -n dev-retroboard
+```
+
+### Testing Access
+
+Verify user permissions (requires OIDC setup):
+
+```bash
+# Test read access (app-developer should have this)
+kubectl auth can-i get pods -n dev-retroboard --as=john.doe@example.com
+# Expected: yes
+
+# Test write access (app-developer should NOT have this)
+kubectl auth can-i delete deployments -n dev-retroboard --as=john.doe@example.com
+# Expected: no
+
+# Test access to platform namespace (app-developer should NOT have this)
+kubectl auth can-i get pods -n argocd --as=john.doe@example.com
+# Expected: no
+
+# Test platform-operator access
+kubectl auth can-i get pods -n argocd --as=platform@example.com
+# Expected: yes (if user has platform-operator role)
+```
+
+## Monitoring
+
+### Check Operator Status
+
+```bash
+# Check operator pod
+kubectl get pods -n rbac-system -l app.kubernetes.io/name=rbac-operator
+
+# Expected output:
+# NAME              READY   STATUS    RESTARTS   AGE
+# rbac-operator-0   2/2     Running   0          5m
+```
+
+### View Operator Logs
+
+```bash
+# View RBAC service logs
+kubectl logs -n rbac-system -l app.kubernetes.io/name=rbac-operator -c rbac-service -f
+
+# View shell-operator logs
+kubectl logs -n rbac-system -l app.kubernetes.io/name=rbac-operator -c operator -f
+```
+
+### Check Reconciliation Status
+
+```bash
+# Check all users
+kubectl get users
+
+# Example output:
+# NAME         EMAIL                   ROLES                  ENABLED   AGE
+# john-doe     john.doe@example.com    ["app-developer"]      true      10m
+# admin-user   admin@example.com       ["system-admin"]       true      5m
+
+# Check user status details
+kubectl get user john-doe -o yaml | grep -A 10 status:
+```
+
+### Force Reconciliation
+
+To trigger immediate reconciliation:
+
+```bash
+# Restart the operator
+kubectl rollout restart statefulset/rbac-operator -n rbac-system
+
+# Or add annotation to user
+kubectl annotate user john-doe reconcile=now-$(date +%s)
+```
+
+## Troubleshooting
+
+### RoleBindings Not Created
+
+**Check User status:**
+```bash
+kubectl get user john-doe -o yaml
+```
+
+Look for error in `status.conditions`:
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "False"
+    reason: ReconciliationFailed
+    message: "ClusterRole homelab:app-developer not found"
+```
+
+**Verify ClusterRoles exist:**
+```bash
+kubectl get clusterrole homelab:app-developer
+kubectl get clusterrole homelab:platform-operator
+kubectl get clusterrole homelab:system-admin
+```
+
+If missing, deploy platform/system RBAC:
+```bash
+cd ~/dev/homelab/platform/helmfile
+helmfile sync
+
+cd ~/dev/homelab/system/helmfile
+helmfile sync
+```
+
+**Check namespace labels:**
+```bash
+kubectl get namespaces --show-labels | grep zengarden
+```
+
+**Verify ArgoCD Applications exist:**
+```bash
+kubectl get applications -A
+```
+
+### Operator Not Starting
+
+**Check pod status:**
+```bash
+kubectl get pods -n rbac-system -l app.kubernetes.io/name=rbac-operator
+```
+
+**Check logs:**
+```bash
+# Shell-operator logs
+kubectl logs -n rbac-system rbac-operator-0 -c operator
+
+# Python service logs
+kubectl logs -n rbac-system rbac-operator-0 -c rbac-service
+```
+
+**Common issues:**
+- Missing ServiceAccount permissions
+- Failed to install Python dependencies
+- Cannot connect to Kubernetes API
+
+### Permission Denied When Testing
+
+If `kubectl auth can-i` shows "no" but you expect "yes":
+
+1. **Verify RoleBinding exists:**
+   ```bash
+   kubectl get rolebindings -n <namespace> | grep <username>
+   ```
+
+2. **Check RoleBinding subjects:**
+   ```bash
+   kubectl get rolebinding <name> -n <namespace> -o yaml
+   ```
+
+   Ensure `subjects[].name` matches OIDC email exactly.
+
+3. **Verify OIDC authentication:**
+   ```bash
+   kubectl get --raw /api/v1/namespaces --as=user@example.com
+   ```
+
+   Should return namespace list, not authentication error.
+
+### User Status Shows Old RoleBindings
+
+The status may be stale. Trigger reconciliation:
+
+```bash
+kubectl annotate user john-doe reconcile=now-$(date +%s)
+```
+
+Wait 10 seconds, then check status again:
+```bash
+kubectl get user john-doe -o yaml | grep -A 20 status:
+```
+
+## Security
+
+The RBAC Operator follows security best practices:
+
+- **Non-root**: Runs as UID 64535
+- **Read-only filesystem**: Cannot write to container filesystem
+- **Minimal permissions**: Only has RBAC to manage RoleBindings
+- **No secret access**: Cannot read Kubernetes Secrets
+- **Auditable**: All changes tracked via User status updates
+- **Label-based**: Managed resources labeled for easy identification
+
+## Migration from Static RoleBindings
+
+If you have existing static RoleBindings:
+
+1. **Identify users in existing RoleBindings:**
+   ```bash
+   kubectl get rolebindings -A -o yaml | grep -A 5 "kind: User"
+   ```
+
+2. **Create User CRDs for each user:**
+   ```yaml
+   apiVersion: zengarden.space/v1
+   kind: User
+   metadata:
+     name: existing-user
+   spec:
+     email: existing@example.com
+     roles:
+       - app-developer  # Match their current role
+     enabled: true
+   ```
+
+3. **Apply User CRDs:**
+   ```bash
+   kubectl apply -f users/
+   ```
+
+4. **Verify operator created RoleBindings:**
+   ```bash
+   kubectl get rolebindings -A -l app.kubernetes.io/managed-by=rbac-operator
+   ```
+
+5. **Delete old static RoleBindings:**
+   ```bash
+   kubectl delete rolebinding <old-binding-name> -n <namespace>
+   ```
+
+## Best Practices
+
+### User Naming Convention
+
+Use lowercase, hyphenated names matching email prefix:
+
+```yaml
+# Good
+name: john-doe
+email: john.doe@example.com
+
+# Bad
+name: JohnDoe
+email: john.doe@example.com
+```
+
+### Role Assignment
+
+Follow the principle of least privilege:
+
+1. Start with `app-developer` for most users
+2. Promote to `platform-operator` only when needed
+3. Reserve `system-admin` for infrastructure team
+4. Never assign `cluster-admin` via User CRD (use static ClusterRoleBinding)
+
+### Namespace Labels
+
+Label namespaces as soon as they're created:
+
+```bash
+# For platform services
+kubectl label namespace <name> zengarden.space/role=platform
+
+# For system infrastructure
+kubectl label namespace <name> zengarden.space/role=system
+```
+
+### Regular Audits
+
+Review user access quarterly:
+
+```bash
+# List all users
+kubectl get users
+
+# Check who has elevated roles
+kubectl get users -o jsonpath='{range .items[?(@.spec.roles[*]=="system-admin")]}{.metadata.name}: {.spec.email}{"\n"}{end}'
+
+# Review RoleBindings
+kubectl get rolebindings -A -l app.kubernetes.io/managed-by=rbac-operator
+```
+
+## Related Documentation
+
+- [RBAC Overview](/operations/rbac) - Complete RBAC architecture and roles
+- [Security](/introduction/security) - Security architecture and defense-in-depth
+- [Maintenance](/operations/maintenance) - Regular RBAC audits
+
+## Conclusion
+
+The RBAC Operator eliminates manual RoleBinding management, ensuring:
+
+1. **Consistent access**: Same permissions across all matching namespaces
+2. **Automated onboarding**: New applications automatically get RoleBindings
+3. **Single source of truth**: User CRDs define role assignments
+4. **GitOps friendly**: User CRDs can be version controlled
+5. **Auditable**: All changes tracked in User status
+
+This automation reduces operational overhead while maintaining strong security through the principle of least privilege.

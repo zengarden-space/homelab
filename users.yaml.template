@@ -1,0 +1,21 @@
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: user1
+spec:
+  email: ....
+  roles:
+    - app-developer
+    - platform-operator
+    - system-admin
+  enabled: true
+---
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: user2
+spec:
+  email: ...
+  roles:
+    - app-developer
+  enabled: true

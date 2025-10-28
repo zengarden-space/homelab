@@ -1,0 +1,27 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+helmDefaults:
+  wait: true
+  timeout: 600
+
+releases:
+  # ClusterRoles (all RBAC ClusterRoles and ClusterRoleBindings)
+  - name: cluster-roles
+    namespace: rbac-system
+    chart: ./cluster-roles/manifests
+
+  # RBAC Operator CRDs
+  - name: rbac-operator-crds
+    namespace: rbac-system
+    chart: ./rbac-crds
+
+  # RBAC Operator
+  - name: rbac-operator
+    namespace: rbac-system
+    chart: ./rbac-operator
+    needs:
+      - rbac-operator-crds
+      - cluster-roles

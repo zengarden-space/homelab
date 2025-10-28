@@ -13,3 +13,6 @@ helmfiles:
   - path: cert-manager/helmfile.yaml.gotmpl
   - path: ingress-nginx/helmfile.yaml.gotmpl
   - path: external-tunnel/helmfile.yaml.gotmpl
+
+  # RBAC
+  - path: rbac-system/helmfile.yaml

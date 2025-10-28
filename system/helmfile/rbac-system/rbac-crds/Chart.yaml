@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rbac-operator-crds
+description: User CRD for RBAC Operator
+type: application
+version: 0.1.0

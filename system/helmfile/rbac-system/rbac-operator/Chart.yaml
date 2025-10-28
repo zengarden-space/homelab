@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rbac-operator
+description: Kubernetes operator for automatic RBAC management based on User CRDs
+type: application
+version: 0.1.0
+appVersion: "1.0"
