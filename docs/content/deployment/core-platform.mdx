@@ -160,9 +160,10 @@ nano env.yaml
 
 **victoria-metrics/env.yaml:**
 ```yaml
-gotify:
+domain: zengarden.space
+notifications:
   adminPassword: "<generate-password>"
-  token: "<will-be-generated-after-deployment>"
+  apiToken: "<will-be-generated-after-deployment>"
 ```
 
 **Repeat for all components with `.env.yaml.template` files.**
@@ -362,13 +363,20 @@ Username: admin
 Password: <from victoria-metrics/env.yaml or generated>
 ```
 
-**Check Prometheus data source:**
+**Check data sources:**
 - Navigate to **Configuration > Data Sources**
 - Should see VictoriaMetrics configured
+- Should see Loki configured (preconfigured datasource)
 
 **Check dashboards:**
 - Navigate to **Dashboards**
 - Import Kubernetes dashboards (if not auto-imported)
+
+**Check logs (Loki):**
+- Navigate to **Explore**
+- Select **Loki** data source
+- Try query: `{namespace="victoria-metrics"}`
+- Should see logs from Promtail
 
 ### 3.8 Verify Metabase
 

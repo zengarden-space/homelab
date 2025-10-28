@@ -471,32 +471,118 @@ def get_data():
     return {'data': 'example'}
 ```
 
-## Log Aggregation (Future Enhancement)
+## Log Aggregation
 
-**Currently not implemented, but recommended:**
+### Loki + Promtail
 
-### Option 1: Loki + Promtail
+**Purpose:** Centralized log aggregation and querying
 
-**Pros:**
-- Lightweight
-- Integrates with Grafana
-- Label-based querying (like Prometheus)
+**Architecture:**
+```
+┌────────────────────────────────────────────────────────────┐
+│                  Log Collection                            │
+│                                                            │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐   │
+│  │ Promtail    │    │ Promtail     │    │ Promtail     │   │
+│  │ (node 1)    │    │ (node 2)     │    │ (node 3)     │   │
+│  │ DaemonSet   │    │ DaemonSet    │    │ DaemonSet    │   │
+│  └──────┬──────┘    └──────┬───────┘    └──────┬───────┘   │
+│         │                  │                   │           │
+│         │   Scrapes logs from /var/log/pods/   │           │
+│         └──────────────────┴───────────────────┘           │
+│                            │                               │
+│                            ▼                               │
+│                 ┌──────────────────────┐                   │
+│                 │   Loki Gateway       │                   │
+│                 └──────────┬───────────┘                   │
+│                            │                               │
+│                            ▼                               │
+│                 ┌──────────────────────┐                   │
+│                 │ Loki (SingleBinary)  │                   │
+│                 │ (log storage)        │                   │
+│                 └──────────┬───────────┘                   │
+└────────────────────────────┼───────────────────────────────┘
+                             │
+                             ▼
+                   ┌──────────────────┐
+                   │     Grafana      │
+                   │ (log exploration)│
+                   └──────────────────┘
+```
 
-**Cons:**
-- Not full-text search (use labels for filtering)
+**Components:**
 
-### Option 2: OpenSearch (ElasticSearch fork)
+**Loki:**
+- Log aggregation system inspired by Prometheus
+- Label-based indexing (not full-text)
+- Filesystem storage (10Gi PVC)
+- SingleBinary deployment mode (simplified architecture)
+- TSDB schema for efficient storage
 
-**Pros:**
-- Full-text search
-- Powerful querying (DSL)
-- Kibana-compatible UI
+**Promtail:**
+- Log shipping agent (DaemonSet on each node)
+- Scrapes container logs from `/var/log/pods/`
+- Kubernetes service discovery
+- Automatic label extraction (namespace, pod, container, app)
+- CRI log format parsing
 
-**Cons:**
-- Resource intensive
-- More complex setup
+**Access:**
+```
+# Grafana with Loki datasource
+URL: https://grafana.homelab.int.zengarden.space
+Data Source: Loki (preconfigured)
+```
 
-**Recommendation:** Loki for homelab (lighter resource footprint)
+**Query Examples:**
+
+```logql
+# View all logs from a namespace
+{namespace="argocd"}
+
+# Filter by pod name
+{namespace="argocd", pod=~"argocd-server.*"}
+
+# Search for error messages
+{namespace="argocd"} |= "error"
+
+# Count errors per pod
+sum by (pod) (count_over_time({namespace="argocd"} |= "error" [5m]))
+
+# Logs from specific container
+{namespace="victoria-metrics", container="loki"}
+
+# Multiple filters
+{namespace="gitea", app="gitea"} |= "authentication" != "success"
+```
+
+**LogQL Syntax:**
+
+- `{label="value"}` - Label selector
+- `|=` - Line contains string
+- `!=` - Line does not contain
+- `|~ "regex"` - Regex match
+- `!~ "regex"` - Regex not match
+- `| json` - Parse JSON logs
+- `| logfmt` - Parse logfmt logs
+
+**Grafana Explore:**
+
+1. Navigate to **Explore** in Grafana
+2. Select **Loki** data source
+3. Use **Log browser** to select labels
+4. Or write LogQL queries directly
+5. View logs in table or stream format
+6. Inspect individual log lines
+
+**Benefits:**
+- **Lightweight:** Lower resource usage than ELK stack
+- **Grafana integration:** Unified metrics + logs UI
+- **Label-based:** Similar query language to PromQL
+- **Cost-effective:** Efficient storage (no full-text indexing)
+
+**Limitations:**
+- **Not full-text search:** Must use labels for filtering (use `|=` for grep-like search)
+- **Label cardinality:** Avoid high-cardinality labels (e.g., don't use log level as label)
 
 ## Troubleshooting Monitoring
 
@@ -559,6 +645,142 @@ curl -X POST http://alertmanager-gotify-nodejs.victoria-metrics.svc:3000/webhook
     }]
   }'
 ```
+
+## Security Auditing
+
+### Automated Security Audit Script
+
+**Purpose:** Automated security breach detection and system integrity checks
+
+**Location:** `system/ansible/install-security-audit/`
+
+**Deployment:** Ansible playbook deploys to `~/bin/security-audit.sh` on all blade nodes
+
+**Installation:**
+```bash
+cd system/ansible/install-security-audit
+./install.sh
+```
+
+This will deploy the script to all blade nodes (blade001-blade005).
+
+**What it checks:**
+1. **Authentication logs** - Failed logins, invalid user attempts
+2. **User accounts** - New users, UID 0 users, shell access
+3. **SSH keys** - Authorized keys for all users
+4. **Network activity** - Listening ports, external connections
+5. **Running processes** - Suspicious patterns, /tmp execution
+6. **Scheduled tasks** - Root and user crontabs
+7. **File integrity** - System file modifications, SUID/SGID files
+8. **System logs** - Security keywords (breach, attack, exploit, malware)
+9. **System resources** - Disk, memory, CPU usage
+10. **Restrictive proxy** - Unauthorized access attempts (custom homelab security)
+
+**Usage:**
+
+```bash
+# Run basic security audit
+ssh blade001 '~/bin/security-audit.sh'
+
+# Run with verbose output
+ssh blade001 '~/bin/security-audit.sh --verbose'
+
+# Get JSON output for parsing
+ssh blade001 '~/bin/security-audit.sh --json'
+```
+
+**Run on all nodes:**
+
+```bash
+for blade in blade001 blade002 blade003 blade004 blade005; do
+  echo "=== $blade ==="
+  ssh $blade '~/bin/security-audit.sh | tail -15'
+done
+```
+
+**Exit codes:**
+- `0` - System secure, no issues detected
+- `1` - Warnings detected, review recommended
+- `2` - Critical issues detected, immediate investigation required
+
+**Example output:**
+
+```
+==========================================
+  Homelab Security Audit
+  blade001 - 2025-10-28 12:48:07
+==========================================
+
+========================================
+1. Authentication Analysis
+========================================
+[✓] No failed login attempts in last 24 hours
+
+========================================
+2. User Account Analysis
+========================================
+[✓] No recently added users
+[✓] Only root has UID 0
+
+========================================
+Security Audit Summary
+========================================
+
+Hostname: blade001
+Timestamp: 2025-10-28 12:48:07
+Status: SECURE
+Critical Issues: 0
+Warnings: 0
+
+✓ System appears secure. No security breaches detected.
+```
+
+**Automated scheduling:**
+
+To run security audits automatically, add to cron:
+
+```bash
+# Add to root crontab on each blade
+# Run security audit daily at 3 AM
+0 3 * * * /home/oleksiyp/bin/security-audit.sh --json > /tmp/security-audit-$(date +\%Y\%m\%d).json
+```
+
+**Integration with monitoring:**
+
+You can export security audit results to Victoria Metrics using a custom exporter or parse JSON output with a script:
+
+```bash
+#!/bin/bash
+# security-audit-exporter.sh
+# Parse security audit JSON and expose as metrics
+
+RESULT=$(~/bin/security-audit.sh --json)
+ISSUES=$(echo "$RESULT" | jq -r '.issues')
+WARNINGS=$(echo "$RESULT" | jq -r '.warnings')
+STATUS=$(echo "$RESULT" | jq -r '.status')
+
+# Expose as Prometheus metrics
+cat <<EOF
+# HELP security_audit_issues Number of critical security issues detected
+# TYPE security_audit_issues gauge
+security_audit_issues{hostname="$(hostname)"} $ISSUES
+
+# HELP security_audit_warnings Number of security warnings detected
+# TYPE security_audit_warnings gauge
+security_audit_warnings{hostname="$(hostname)"} $WARNINGS
+
+# HELP security_audit_status Security audit status (0=SECURE, 1=COMPROMISED)
+# TYPE security_audit_status gauge
+security_audit_status{hostname="$(hostname)"} $([ "$STATUS" == "SECURE" ] && echo 0 || echo 1)
+EOF
+```
+
+**Security best practices:**
+- Run audits daily on all nodes
+- Review warnings promptly (within 24 hours)
+- Investigate critical issues immediately
+- Keep audit logs for compliance/forensics
+- Update the script as new threats emerge
 
 ## Best Practices
 

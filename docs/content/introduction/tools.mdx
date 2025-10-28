@@ -505,6 +505,29 @@ alertmanager-gotify-nodejs (webhook → Gotify API)
 Gotify (push notifications to mobile/web)
 ```
 
+### Loki + Promtail
+
+**Purpose**: Log aggregation and querying
+
+**Why Loki:**
+| Feature | Benefit |
+|---------|---------|
+| **Lightweight** | ⭐⭐⭐⭐⭐ Lower resource usage than ELK |
+| **Grafana integration** | ⭐⭐⭐⭐⭐ Unified metrics + logs UI |
+| **Label-based** | ⭐⭐⭐⭐ Similar to PromQL |
+| **Storage efficiency** | ⭐⭐⭐⭐ Only indexes labels, not content |
+
+**Components:**
+- **Loki**: Log aggregation storage (SingleBinary mode)
+- **Promtail**: Log shipping agent (DaemonSet)
+- **Loki Gateway**: Query routing
+
+**Why NOT ELK/OpenSearch:**
+- ElasticSearch/OpenSearch are resource-intensive (~4GB+ RAM)
+- Full-text indexing unnecessary for homelab scale
+- Loki's label-based approach sufficient for filtering
+- Better Grafana integration (unified observability)
+
 ## Database
 
 ### CloudNativePG (CNPG)
@@ -613,6 +636,8 @@ kubernetes:
 | **Secrets** | ESO + DerivedSecrets | External integration + deterministic derivation |
 | **Metrics** | Victoria Metrics | Resource-efficient, PromQL-compatible |
 | **Dashboards** | Grafana | Industry standard, flexible |
+| **Logs** | Loki + Promtail | Lightweight, label-based, Grafana-integrated |
+| **Alerts** | AlertManager + Gotify | Alert routing + self-hosted notifications |
 | **Database** | CloudNativePG | Native operator, HA, backups |
 | **Analytics** | Metabase | Self-hosted, user-friendly BI |
 

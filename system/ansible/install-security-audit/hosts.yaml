@@ -1,0 +1,17 @@
+all:
+  hosts:
+    blade001:
+      ansible_user: ansible
+      ansible_host: blade001
+    blade002:
+      ansible_user: ansible
+      ansible_host: blade002
+    blade003:
+      ansible_user: ansible
+      ansible_host: blade003
+    blade004:
+      ansible_user: ansible
+      ansible_host: blade004
+    blade005:
+      ansible_user: ansible
+      ansible_host: blade005

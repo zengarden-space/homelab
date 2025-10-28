@@ -1,0 +1,50 @@
+- name: Install Security Audit Script
+  hosts: all
+  tasks:
+    - name: Ping hosts
+      ping:
+
+    - name: Ensure ~/bin directory exists for ansible user
+      file:
+        path: "/home/{{ ansible_user }}/bin"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Copy security-audit.sh to ansible user bin directory
+      copy:
+        src: files/security-audit.sh
+        dest: "/home/{{ ansible_user }}/bin/security-audit.sh"
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Ensure oleksiyp bin directory exists
+      become: true
+      file:
+        path: /home/oleksiyp/bin
+        state: directory
+        mode: '0755'
+        owner: oleksiyp
+        group: oleksiyp
+      when: ansible_user != 'oleksiyp'
+
+    - name: Copy security-audit.sh to oleksiyp bin directory
+      become: true
+      copy:
+        src: files/security-audit.sh
+        dest: /home/oleksiyp/bin/security-audit.sh
+        mode: '0755'
+        owner: oleksiyp
+        group: oleksiyp
+      when: ansible_user != 'oleksiyp'
+
+    - name: Verify installation
+      command: "/home/{{ ansible_user }}/bin/security-audit.sh --help"
+      register: script_test
+      changed_when: false
+
+    - name: Display script help
+      debug:
+        msg: "{{ script_test.stdout_lines }}"
