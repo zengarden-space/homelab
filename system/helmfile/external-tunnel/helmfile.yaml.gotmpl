@@ -55,9 +55,17 @@ releases:
               originRequest:
                   noTLSVerify: true
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
-              hostname: "*.{{ .Values.domain }}"
+              hostname: "t.{{ .Values.domain }}"
               originRequest:
                   noTLSVerify: true          
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "notifications.{{ .Values.domain }}"
+              originRequest:
+                  noTLSVerify: true
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "retroboard.{{ .Values.domain }}"
+              originRequest:
+                  noTLSVerify: true
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
               hostname: "effective-retro.com"
               originRequest:
