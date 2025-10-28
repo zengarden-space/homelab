@@ -99,7 +99,7 @@ helmfile/
 | **Automatic sync** | Self-healing on configuration drift |
 | **Multi-cluster** | Supports multiple K8s clusters (future) |
 | **RBAC & SSO** | Google OIDC integration |
-| **ApplicationSet** | Automatic app discovery from Git |
+| **application** | Automatic app discovery from Git |
 | **UI + CLI** | Great visibility and debugging |
 
 **Alternatives Considered:**
@@ -128,10 +128,10 @@ argocd:
         g, role:readonly, role:readonly
 ```
 
-**ApplicationSet for Auto-Discovery:**
+**application for Auto-Discovery:**
 ```yaml
 apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
+kind: application
 metadata:
   name: applications
 spec:
@@ -608,7 +608,7 @@ kubernetes:
 | **Ingress** | ingress-nginx | Mature, feature-rich, ModSecurity support |
 | **Certificates** | cert-manager | ACME automation, internal CA |
 | **DNS** | external-dns | Automatic record sync, multi-provider |
-| **GitOps** | ArgoCD | ApplicationSet, auto-discovery, SSO |
+| **GitOps** | ArgoCD | application, auto-discovery, SSO |
 | **Git Server** | Gitea | Lightweight, GitHub-compatible, Actions |
 | **Secrets** | ESO + DerivedSecrets | External integration + deterministic derivation |
 | **Metrics** | Victoria Metrics | Resource-efficient, PromQL-compatible |

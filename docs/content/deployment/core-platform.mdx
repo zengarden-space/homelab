@@ -450,18 +450,18 @@ argocd repo add https://gitea.homelab.int.zengarden.space/zengarden-space/manife
   --password <gitea-admin-password>
 ```
 
-### 5.3 Verify ArgoCD ApplicationSet
+### 5.3 Verify ArgoCD application
 
-**Check ApplicationSet:**
+**Check application:**
 ```bash
-kubectl -n argocd get applicationsets
+kubectl -n argocd get applications
 
 # Expected:
 # NAME           AGE
 # applications   10m
 ```
 
-**ApplicationSet should auto-discover apps from manifests/ repo directories**
+**application should auto-discover apps from manifests/ repo directories**
 
 ## Troubleshooting
 

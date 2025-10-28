@@ -30,7 +30,7 @@ This guide explains how to deploy applications using the GitOps workflow: GitHub
 
 - Core platform deployed (ArgoCD, Gitea running)
 - Gitea-GitHub synchronization working
-- ArgoCD ApplicationSet configured
+- ArgoCD application configured
 - manifests repository exists in Gitea
 
 ## Step 1: Verify Gitea-GitHub Sync
@@ -418,7 +418,7 @@ cat example-app/kustomization.yaml
 
 ### 5.5 Verify ArgoCD Detected Application
 
-**Check ArgoCD ApplicationSet:**
+**Check ArgoCD application:**
 
 ```bash
 # List applications
@@ -519,10 +519,10 @@ kubectl -n example-app rollout status deployment/example-app
 
 ### ArgoCD Not Detecting Application
 
-**Check ApplicationSet:**
+**Check application:**
 
 ```bash
-kubectl -n argocd get applicationset applications -o yaml
+kubectl -n argocd get application applications -o yaml
 
 # Verify git.directories includes manifests/*
 ```
@@ -530,7 +530,7 @@ kubectl -n argocd get applicationset applications -o yaml
 **Check ArgoCD logs:**
 
 ```bash
-kubectl -n argocd logs -l app.kubernetes.io/name=argocd-applicationset-controller --tail=50
+kubectl -n argocd logs -l app.kubernetes.io/name=argocd-application-controller --tail=50
 ```
 
 **Manually create Application (if needed):**

@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: manifests-gitops
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.application.git.repoURL }}
+    targetRevision: {{ .Values.application.git.revision }}
+    path: {{ .Values.application.git.path }}
+  destination:
+    server: {{ .Values.application.destinationServer }}
+    namespace: {{ .Values.application.namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

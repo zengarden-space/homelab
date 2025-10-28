@@ -67,6 +67,10 @@ releases:
               originRequest:
                   noTLSVerify: true
             - service: https://ingress-nginx-external-controller.external-tunnel.svc
+              hostname: "homelab.{{ .Values.domain }}"
+              originRequest:
+                  noTLSVerify: true
+            - service: https://ingress-nginx-external-controller.external-tunnel.svc
               hostname: "effective-retro.com"
               originRequest:
                   noTLSVerify: true

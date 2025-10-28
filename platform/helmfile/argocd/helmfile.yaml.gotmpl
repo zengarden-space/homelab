@@ -17,11 +17,11 @@ releases:
     chart: ./charts/argocd-config
     values:
       - domain: {{ .Values.domain }}
-        applicationSet:
+        application:
           git:
             repoURL: https://gitea.homelab.int.{{ .Values.domain }}/zengarden-space/manifests.git
             revision: main
-            manifestsPath: manifests/*
+            path: homelab
 
   - name: argocd
     namespace: argocd
@@ -59,7 +59,7 @@ releases:
             enabled: true
             minReplicas: 2
 
-        applicationSet:
+        application:
           replicas: 2
 
         configs:

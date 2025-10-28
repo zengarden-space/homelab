@@ -69,13 +69,10 @@ on:
         type: string
         default: 'prod-'
     secrets:
-      package-write-token:
-        description: 'Token for writing packages'
-        required: true
       external-github-token:
         description: 'Token for accessing external GitHub resources'
         required: true
-      content-write-token:
+      manifests-write-token:
         description: 'Token for writing to manifests repository'
         required: true
     outputs:
@@ -265,7 +262,7 @@ jobs:
           repository: ${{ inputs.manifests-repo }}
           ref: ${{ inputs.manifests-branch }}
           path: manifests
-          token: ${{ secrets.content-write-token }}
+          token: ${{ secrets.manifests-write-token }}
 
       - name: Push changes to dev
         if: steps.check-values.outputs.dev-exists == 'true'
@@ -328,7 +325,7 @@ jobs:
           cd manifests
 
           # Check if PR exists using Gitea API - fetch all open PRs and filter with jq
-          pr_exists=$(curl -s -H "Authorization: token ${{ secrets.content-write-token }}" \
+          pr_exists=$(curl -s -H "Authorization: token ${{ secrets.manifests-write-token }}" \
             "https://gitea.homelab.int.zengarden.space/api/v1/repos/${{ inputs.manifests-repo }}/pulls?state=open" \
             | jq --arg branch "${{ inputs.prod-namespace-prefix }}$repo_name" '[.[] | select(.head.ref == $branch)] | length')
 
@@ -367,7 +364,7 @@ jobs:
 
           # Create PR using Gitea API
           response=$(curl -s -w "\n%{http_code}" -X POST \
-            -H "Authorization: token ${{ secrets.content-write-token }}" \
+            -H "Authorization: token ${{ secrets.manifests-write-token }}" \
             -H "Content-Type: application/json" \
             "https://gitea.homelab.int.zengarden.space/api/v1/repos/${{ inputs.manifests-repo }}/pulls" \
             -d @- <<EOF

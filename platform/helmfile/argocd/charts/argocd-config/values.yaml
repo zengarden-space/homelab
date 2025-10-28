@@ -1,27 +1,13 @@
 # Domain configuration
 domain: zengarden.space
 
-# ArgoCD ApplicationSet configuration
-applicationSet:
-  name: applications
+# ArgoCD application configuration
+application:
   namespace: argocd
 
-  # Git repository configuration
   git:
     repoURL: ""  # Set dynamically via helmfile
     revision: main
-    manifestsPath: "manifests/*"
-  
-  # Application template configuration
-  template:
-    project: default
-    syncPolicy:
-      automated:
-        prune: true
-        allowEmpty: true
-        selfHeal: true
-      syncOptions:
-        - CreateNamespace=true
-    
-    # Destination cluster
-    destinationServer: https://kubernetes.default.svc
+    path: homelab
+
+  destinationServer: https://kubernetes.default.svc
