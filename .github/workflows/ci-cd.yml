@@ -124,8 +124,8 @@ jobs:
             fi
 
             # Copy manifest and add files
-            mkdir -p ./manifests/homelab-docs
-            cp ../manifest.yaml ./manifests/homelab-docs/manifest.yaml
+            mkdir -p ./homelab/prod/homelab-docs
+            cp ../manifest.yaml ./homelab/prod/homelab-docs/manifest.yaml
             git add .
 
             # Check if there are changes to commit
