@@ -207,12 +207,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check values files existence
+        id: check-values
+        run: |
+          if [ -f "${{ inputs.dev-values-file }}" ]; then
+            echo "dev-exists=true" >> $GITHUB_OUTPUT
+            echo "Dev values file exists: ${{ inputs.dev-values-file }}"
+          else
+            echo "dev-exists=false" >> $GITHUB_OUTPUT
+            echo "Dev values file not found: ${{ inputs.dev-values-file }}"
+          fi
+
+          if [ -f "${{ inputs.prod-values-file }}" ]; then
+            echo "prod-exists=true" >> $GITHUB_OUTPUT
+            echo "Prod values file exists: ${{ inputs.prod-values-file }}"
+          else
+            echo "prod-exists=false" >> $GITHUB_OUTPUT
+            echo "Prod values file not found: ${{ inputs.prod-values-file }}"
+          fi
+
       - name: Setup Helm
+        if: steps.check-values.outputs.dev-exists == 'true' || steps.check-values.outputs.prod-exists == 'true'
         uses: azure/setup-helm@v4
         with:
           version: ${{ inputs.helm-version }}
 
       - name: Update Helm values (dev)
+        if: steps.check-values.outputs.dev-exists == 'true'
         run: |
           repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
           IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
@@ -227,6 +248,7 @@ jobs:
             --set image.tag=$IMAGE_TAG > manifest-dev.yaml
 
       - name: Update Helm values (prod)
+        if: steps.check-values.outputs.prod-exists == 'true'
         run: |
           repo_name=$(echo ${{github.repository}} | cut -d'/' -f2)
           IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
