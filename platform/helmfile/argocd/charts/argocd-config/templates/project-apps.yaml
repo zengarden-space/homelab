@@ -13,21 +13,9 @@ spec:
   # Allowed destinations
   destinations:
     # Application namespaces
-    - namespace: homelab-docs
+    - namespace: prod-*
       server: {{ .Values.application.destinationServer }}
-    - namespace: dev-retroboard
-      server: {{ .Values.application.destinationServer }}
-    - namespace: dev-retroboard-api
-      server: {{ .Values.application.destinationServer }}
-    - namespace: prod-retroboard
-      server: {{ .Values.application.destinationServer }}
-    - namespace: prod-retroboard-api
-      server: {{ .Values.application.destinationServer }}
-    - namespace: temperature-monitor
-      server: {{ .Values.application.destinationServer }}
-    - namespace: temperature-monitor-api
-      server: {{ .Values.application.destinationServer }}
-    - namespace: secret-editor
+    - namespace: dev-*
       server: {{ .Values.application.destinationServer }}
 
     # Secrets namespace (for DerivedSecret CRDs)
@@ -41,6 +29,8 @@ spec:
   namespaceResourceWhitelist:
     # Core resources
     - group: ''
+      kind: Pod
+    - group: ''
       kind: Service
     - group: ''
       kind: ConfigMap
@@ -52,6 +42,8 @@ spec:
       kind: PersistentVolumeClaim
 
     # Workload resources
+    - group: apps
+      kind: ReplicaSet
     - group: apps
       kind: Deployment
     - group: apps
@@ -102,6 +94,10 @@ spec:
       kind: VMPodScrape
     - group: operator.victoriametrics.com
       kind: VMRule
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
 
     # Custom homelab CRDs
     - group: zengarden.space
