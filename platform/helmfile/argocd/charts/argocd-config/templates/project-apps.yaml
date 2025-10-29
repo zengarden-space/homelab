@@ -23,7 +23,9 @@ spec:
       server: {{ .Values.application.destinationServer }}
 
   # Cluster resource whitelist (namespace-scoped resources only)
-  clusterResourceWhitelist: []
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
 
   # Namespace resource whitelist (allow resources actually used by apps)
   namespaceResourceWhitelist:
