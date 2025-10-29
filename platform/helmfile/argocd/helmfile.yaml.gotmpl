@@ -72,89 +72,20 @@ releases:
             url: https://argocd.homelab.int.{{ .Values.domain }}
             dex.config: |
               connectors:
-                - type: google
+                - type: oidc
                   id: google
                   name: Google
                   config:
+                    issuer: https://accounts.google.com
                     clientID: $argocd-google-oauth:clientId
                     clientSecret: $argocd-google-oauth:clientSecret
-                    redirectURI: https://argocd.homelab.int.{{ .Values.domain }}/api/dex/callback
+                    # Use email claim as username for RBAC matching
+                    userIdKey: email
           rbac:
-            policy.default: role:readonly
-            policy.csv: |
-              # ============================================
-              # Application Developer Role
-              # ============================================
-              # Can work with apps in the 'apps' project only
-              p, role:app-developer, applications, get, apps/*, allow
-              p, role:app-developer, applications, sync, apps/*, allow
-              p, role:app-developer, applications, override, apps/*, allow
-              p, role:app-developer, applications, action/*, apps/*, allow
-              p, role:app-developer, logs, get, apps/*, allow
-              p, role:app-developer, exec, create, apps/*, allow
-
-              # Cannot create/delete applications
-              p, role:app-developer, applications, create, *, deny
-              p, role:app-developer, applications, delete, *, deny
-
-              # Cannot access default project (platform/system apps)
-              p, role:app-developer, applications, *, default/*, deny
-
-              # ============================================
-              # Platform Operator Role
-              # ============================================
-              # Full access to apps project
-              p, role:platform-operator, applications, *, apps/*, allow
-              p, role:platform-operator, logs, get, */*, allow
-              p, role:platform-operator, exec, create, */*, allow
-
-              # Can view default project apps (but not modify)
-              p, role:platform-operator, applications, get, default/*, allow
-              p, role:platform-operator, applications, sync, default/*, deny
-              p, role:platform-operator, applications, delete, default/*, deny
-
-              # Can manage projects and repositories
-              p, role:platform-operator, projects, get, *, allow
-              p, role:platform-operator, projects, create, *, allow
-              p, role:platform-operator, projects, update, *, allow
-              p, role:platform-operator, repositories, get, *, allow
-              p, role:platform-operator, repositories, create, *, allow
-              p, role:platform-operator, repositories, update, *, allow
-
-              # Cannot delete critical projects
-              p, role:platform-operator, projects, delete, default, deny
-              p, role:platform-operator, projects, delete, apps, deny
-
-              # ============================================
-              # System Administrator Role
-              # ============================================
-              # Full access to all projects and ArgoCD management
-              p, role:system-admin, applications, *, */*, allow
-              p, role:system-admin, logs, *, */*, allow
-              p, role:system-admin, exec, *, */*, allow
-              p, role:system-admin, projects, *, *, allow
-              p, role:system-admin, repositories, *, *, allow
-              p, role:system-admin, certificates, *, *, allow
-              p, role:system-admin, gpgkeys, *, *, allow
-              p, role:system-admin, accounts, get, *, allow
-              p, role:system-admin, accounts, update, *, allow
-
-              # Cannot delete clusters
-              p, role:system-admin, clusters, delete, *, deny
-
-              # ============================================
-              # Cluster Admin Role
-              # ============================================
-              # Break-glass full access
-              p, role:cluster-admin, *, *, *, allow
-
-              # ============================================
-              # Role Assignments
-              # ============================================
-              g, oleksiy.pylypenko@gmail.com, role:cluster-admin
-
-              # Example assignments:
-              # g, developer@example.com, role:app-developer
-              # g, platformeng@example.com, role:platform-operator
-              # g, sysadmin@example.com, role:system-admin
+            # Disable built-in RBAC ConfigMap creation - managed by RBAC operator
+            create: false
+            # RBAC policy is managed by the RBAC operator via argocd-rbac-cm ConfigMap
+            # The operator syncs User CRD roles to ArgoCD automatically
+            # Scopes configuration (email claim usage) is also managed by the operator
+            # See: system/helmfile/rbac-system/rbac-operator
 

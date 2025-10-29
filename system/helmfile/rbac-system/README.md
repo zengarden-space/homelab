@@ -72,7 +72,7 @@ Defines all ClusterRoles for the homelab:
 
 ### RBAC Operator
 
-Automatically manages RoleBindings based on:
+Automatically manages RoleBindings and ArgoCD RBAC based on:
 - **User CRDs** (`zengarden.space/v1`): Define users and their roles
 - **ClusterRole annotations**: Define which namespaces each role applies to
 - **ArgoCD Applications**: Dynamically discover application namespaces via `@argocd` token
@@ -90,7 +90,11 @@ Automatically manages RoleBindings based on:
    - Operator reads ClusterRole annotations to get namespace list
    - Creates RoleBinding named `homelab:<role>:<username>` in each namespace
    - RoleBinding references the ClusterRole (e.g., `homelab:app-developer`)
-5. **Reconciliation**: Runs every 5 minutes + on-demand when Users, ClusterRoles, or Applications change
+5. **ArgoCD RBAC Sync**: If `argocd` namespace exists:
+   - Generates `argocd-rbac-cm` ConfigMap with role definitions and user assignments
+   - Keeps ArgoCD RBAC in sync with Kubernetes User CRDs
+   - Users automatically get matching permissions in ArgoCD UI
+6. **Reconciliation**: Runs every 5 minutes + on-demand when Users, ClusterRoles, or Applications change
 
 #### Supported Roles
 
@@ -204,11 +208,27 @@ All RBAC components are unified in `system/helmfile/rbac-system`:
 
 - **RBAC Operator** (`rbac-operator/`):
   - Automates RoleBinding creation based on User CRDs
-  - Discovers namespaces from ArgoCD and labels
+  - Discovers namespaces from ClusterRole annotations and ArgoCD Applications
   - Creates per-user RoleBindings in appropriate namespaces
   - Manages app-developer, platform-operator, and system-admin bindings
+  - Syncs ArgoCD RBAC ConfigMap (`argocd-rbac-cm`) to keep ArgoCD permissions in sync
 
 **Migration Path**: All static RoleBindings in `cluster-roles/` (except cluster-admin) will be replaced by User CRDs.
+
+## ArgoCD RBAC Integration
+
+The RBAC operator automatically manages ArgoCD RBAC permissions:
+
+- **Automatic Sync**: When `argocd` namespace exists, operator generates/updates `argocd-rbac-cm` ConfigMap
+- **Role Mappings**: User CRD roles automatically map to ArgoCD roles:
+  - `app-developer` → ArgoCD `role:app-developer` (view/sync apps in 'apps' project)
+  - `platform-operator` → ArgoCD `role:platform-operator` (manage apps, projects, repos)
+  - `system-admin` → ArgoCD `role:system-admin` (full ArgoCD access)
+  - `cluster-admin` → ArgoCD `role:cluster-admin` (unrestricted)
+- **User Assignments**: Users are automatically assigned ArgoCD roles based on their User CRD spec
+- **Default Policy**: Unauthenticated users get `role:readonly` (view-only access)
+
+Example: Creating a User CRD with `roles: [app-developer]` automatically grants that user ArgoCD permissions to view and sync applications in the 'apps' project.
 
 ## Security
 

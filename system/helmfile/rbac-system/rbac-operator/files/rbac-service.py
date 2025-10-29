@@ -349,7 +349,164 @@ class RBACOperatorService:
 
             self.reconcile_user(user)
 
+        # Sync ArgoCD RBAC if argocd namespace exists
+        self.sync_argocd_rbac(users)
+
         print("=== Reconciliation complete ===\n", flush=True)
+
+    def sync_argocd_rbac(self, users: List[Dict]):
+        """Generate and update ArgoCD RBAC ConfigMap if argocd namespace exists"""
+        try:
+            # Check if argocd namespace exists
+            try:
+                self.v1.read_namespace(name='argocd')
+            except client.rest.ApiException as e:
+                if e.status == 404:
+                    print("ArgoCD namespace does not exist, skipping RBAC sync", flush=True)
+                    return
+                raise
+
+            print("Syncing ArgoCD RBAC ConfigMap", flush=True)
+
+            # Build policy.csv content
+            policy_lines = []
+
+            # Add role definitions (static)
+            # NOTE: Roles are hierarchical - users should only have ONE role assigned
+            # Higher roles inherit lower role permissions
+            policy_lines.extend([
+                "# ============================================",
+                "# Application Developer Role",
+                "# ============================================",
+                "# Can work with apps in the 'apps' project only",
+                "p, role:app-developer, applications, get, apps/*, allow",
+                "p, role:app-developer, applications, sync, apps/*, allow",
+                "p, role:app-developer, applications, override, apps/*, allow",
+                "p, role:app-developer, applications, action/*, apps/*, allow",
+                "p, role:app-developer, logs, get, apps/*, allow",
+                "p, role:app-developer, exec, create, apps/*, allow",
+                "",
+                "# ============================================",
+                "# Platform Operator Role",
+                "# ============================================",
+                "# Full access to apps project",
+                "p, role:platform-operator, applications, *, apps/*, allow",
+                "p, role:platform-operator, logs, get, */*, allow",
+                "p, role:platform-operator, exec, create, */*, allow",
+                "",
+                "# Can view default project apps (but not modify)",
+                "p, role:platform-operator, applications, get, default/*, allow",
+                "",
+                "# Can manage projects and repositories",
+                "p, role:platform-operator, projects, get, *, allow",
+                "p, role:platform-operator, projects, create, *, allow",
+                "p, role:platform-operator, projects, update, *, allow",
+                "p, role:platform-operator, repositories, get, *, allow",
+                "p, role:platform-operator, repositories, create, *, allow",
+                "p, role:platform-operator, repositories, update, *, allow",
+                "",
+                "# ============================================",
+                "# System Administrator Role",
+                "# ============================================",
+                "# Full access to all projects and ArgoCD management",
+                "p, role:system-admin, applications, *, */*, allow",
+                "p, role:system-admin, logs, *, */*, allow",
+                "p, role:system-admin, exec, *, */*, allow",
+                "p, role:system-admin, projects, *, *, allow",
+                "p, role:system-admin, repositories, *, *, allow",
+                "p, role:system-admin, certificates, *, *, allow",
+                "p, role:system-admin, gpgkeys, *, *, allow",
+                "p, role:system-admin, accounts, get, *, allow",
+                "p, role:system-admin, accounts, update, *, allow",
+                "",
+                "# ============================================",
+                "# Cluster Admin Role",
+                "# ============================================",
+                "# Break-glass full access",
+                "p, role:cluster-admin, *, *, *, allow",
+                "",
+                "# ============================================",
+                "# Role Assignments (Generated from User CRDs)",
+                "# ============================================",
+            ])
+
+            # Add user role assignments (dynamic from User CRDs)
+            # ArgoCD roles are hierarchical - assign only the highest role per user
+            role_hierarchy = ['cluster-admin', 'system-admin', 'platform-operator', 'app-developer']
+
+            for user in users:
+                spec = user.get('spec', {})
+                email = spec.get('email')
+                roles = spec.get('roles', [])
+                enabled = spec.get('enabled', True)
+
+                if not enabled or not email:
+                    continue
+
+                # Find the highest role in the hierarchy
+                highest_role = None
+                for role in role_hierarchy:
+                    if role in roles:
+                        highest_role = role
+                        break
+
+                # Assign only the highest role for ArgoCD
+                if highest_role:
+                    policy_lines.append(f"g, {email}, role:{highest_role}")
+
+            policy_csv = '\n'.join(policy_lines) + '\n'
+
+            # Check if ConfigMap exists
+            cm_name = 'argocd-rbac-cm'
+            try:
+                existing_cm = self.v1.read_namespaced_config_map(name=cm_name, namespace='argocd')
+
+                # Update existing ConfigMap
+                if existing_cm.data is None:
+                    existing_cm.data = {}
+
+                existing_cm.data['policy.csv'] = policy_csv
+                existing_cm.data['policy.default'] = 'role:readonly'
+                existing_cm.data['scopes'] = '[groups, email]'
+
+                self.v1.replace_namespaced_config_map(
+                    name=cm_name,
+                    namespace='argocd',
+                    body=existing_cm
+                )
+                print(f"Updated ArgoCD RBAC ConfigMap with {len(users)} users", flush=True)
+
+            except client.rest.ApiException as e:
+                if e.status == 404:
+                    # Create new ConfigMap
+                    cm = client.V1ConfigMap(
+                        metadata=client.V1ObjectMeta(
+                            name=cm_name,
+                            namespace='argocd',
+                            labels={
+                                'app.kubernetes.io/managed-by': 'rbac-operator',
+                                'app.kubernetes.io/part-of': 'argocd'
+                            }
+                        ),
+                        data={
+                            'policy.csv': policy_csv,
+                            'policy.default': 'role:readonly',
+                            'scopes': '[groups, email]'
+                        }
+                    )
+
+                    self.v1.create_namespaced_config_map(
+                        namespace='argocd',
+                        body=cm
+                    )
+                    print(f"Created ArgoCD RBAC ConfigMap with {len(users)} users", flush=True)
+                else:
+                    raise
+
+        except Exception as e:
+            print(f"ERROR syncing ArgoCD RBAC: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc()
 
 
 def watch_requests(service: RBACOperatorService, shared_dir='/shared'):

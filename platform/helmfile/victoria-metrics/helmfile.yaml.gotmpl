@@ -16,10 +16,18 @@ repositories:
     url: https://grafana.github.io/helm-charts
 
 releases:
+  # Prometheus Operator CRDs (required by victoria-metrics-k8s-stack)
+  - name: prometheus-operator-crds
+    namespace: victoria-metrics
+    chart: oci://ghcr.io/prometheus-community/charts/prometheus-operator-crds
+    version: 24.0.1
+
   - name: vm
     namespace: victoria-metrics
     chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack
     version: 0.48.1
+    needs:
+      - victoria-metrics/prometheus-operator-crds
     values:
       - grafana:
           ingress:

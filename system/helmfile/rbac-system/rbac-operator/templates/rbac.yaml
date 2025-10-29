@@ -37,6 +37,11 @@ rules:
     resources: ["clusterroles"]
     verbs: ["get", "list", "watch"]
 
+  # Manage ConfigMaps (for ArgoCD RBAC sync)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
 ---
 # ClusterRoleBinding for RBAC Operator
 apiVersion: rbac.authorization.k8s.io/v1

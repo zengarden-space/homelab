@@ -2,7 +2,50 @@
 
 ## Overview
 
-The homelab implements a **four-tier privilege escalation model** for both ArgoCD and Kubernetes access control. This provides granular permissions while maintaining security through the principle of least privilege.
+The homelab implements a **unified RBAC system** that automatically synchronizes permissions across both ArgoCD and Kubernetes. A single User CRD serves as the source of truth, with the RBAC Operator automating RoleBinding creation and ArgoCD policy synchronization.
+
+**Key Features:**
+- **Single Source of Truth**: User CRDs (`zengarden.space/v1`) define all user access
+- **Automated Synchronization**: RBAC Operator manages both Kubernetes RoleBindings and ArgoCD policies
+- **Four-Tier Role Model**: Hierarchical roles from developer to cluster admin
+- **Dynamic Namespace Discovery**: Automatically discovers application namespaces from ArgoCD Applications
+- **ClusterRole Annotations**: Namespace configuration stored in ClusterRole annotations (no manual labeling needed)
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User CRD                             │
+│  apiVersion: zengarden.space/v1                             │
+│  kind: User                                                 │
+│  spec:                                                      │
+│    email: user@example.com                                  │
+│    roles: [app-developer, platform-operator, system-admin]  │
+│    enabled: true                                            │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   RBAC Operator                             │
+│  (StatefulSet in rbac-system namespace)                     │
+│  ┌────────────────┐  ┌─────────────────────────────┐       │
+│  │ Shell-Operator │  │ Python Service              │       │
+│  │ - Watches:     │◄─┤ - ClusterRole discovery     │       │
+│  │   • Users      │  │ - Namespace expansion       │       │
+│  │   • ClusterRoles│ │ - RoleBinding creation     │       │
+│  │   • ArgoCD Apps│  │ - ArgoCD RBAC sync         │       │
+│  └────────────────┘  └─────────────────────────────┘       │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+        ┌─────────────┼─────────────┐
+        │             │             │
+        ▼             ▼             ▼
+┌──────────────┐ ┌────────────┐ ┌─────────────┐
+│ Kubernetes   │ │ ArgoCD     │ │ Dynamic NS  │
+│ RoleBindings │ │ RBAC CM    │ │ Discovery   │
+│ (per NS)     │ │ (synced)   │ │ (@argocd)   │
+└──────────────┘ └────────────┘ └─────────────┘
+```
 
 ## Role Hierarchy
 
@@ -46,7 +89,129 @@ Managed by application developers:
 - `temperature-monitor`, `temperature-monitor-api` - IoT monitoring
 - `secret-editor` - Secret management UI
 
+## RBAC System Architecture
+
+The RBAC system is centralized in `system/helmfile/rbac-system`:
+
+```
+rbac-system/
+├── cluster-roles/          # All ClusterRoles and static bindings
+│   └── manifests/
+│       └── templates/
+│           ├── rbac-app-developer.yaml
+│           ├── rbac-platform-operator.yaml
+│           ├── rbac-system-admin.yaml
+│           └── rbac-cluster-admin.yaml
+├── rbac-crds/             # User CRD definition
+│   └── templates/
+│       └── user-crd.yaml
+├── rbac-operator/         # Automated RBAC management
+│   ├── files/
+│   │   └── rbac-service.py   # Sync logic
+│   └── templates/
+└── env.yaml               # Cluster admin email configuration
+```
+
+### How It Works
+
+1. **Admin creates User CRD** specifying email and roles
+2. **RBAC Operator discovers namespaces**:
+   - Reads ClusterRole `zengarden.space/namespaces` annotations
+   - Expands `@argocd` token to all ArgoCD Application namespaces
+3. **Operator creates resources**:
+   - Kubernetes: RoleBindings in appropriate namespaces
+   - ArgoCD: Updates `argocd-rbac-cm` ConfigMap with user assignments
+4. **Automatic reconciliation** every 5 minutes + on-demand
+
+### User Management
+
+#### Creating a User
+
+Basic user with single role:
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: john-doe
+spec:
+  email: john.doe@example.com  # Must match OIDC email
+  roles:
+    - app-developer
+  enabled: true
+```
+
+```bash
+kubectl apply -f user.yaml
+```
+
+This single resource automatically:
+- Creates Kubernetes RoleBindings in all appropriate namespaces
+- Updates ArgoCD RBAC policy (`argocd-rbac-cm`)
+- Keeps permissions synchronized across both systems
+
+#### User with Multiple Roles
+
+```yaml
+apiVersion: zengarden.space/v1
+kind: User
+metadata:
+  name: platform-admin
+spec:
+  email: admin@example.com
+  roles:
+    - platform-operator
+    - system-admin
+  enabled: true
+```
+
+This creates RoleBindings in:
+- Application namespaces (from `platform-operator` role)
+- Platform namespaces (from `platform-operator` role)
+- System namespaces (from `system-admin` role)
+
+**Note**: For ArgoCD, only the highest role (`system-admin`) is assigned to avoid permission conflicts.
+
+#### Disabling a User
+
+Disable access while preserving the User resource:
+
+```bash
+kubectl patch user john-doe --type=merge -p '{"spec":{"enabled":false}}'
+```
+
+Or edit the User directly:
+
+```yaml
+spec:
+  enabled: false  # Removes all RoleBindings and ArgoCD access
+```
+
+#### Managing Users
+
+```bash
+# List all users
+kubectl get users
+
+# Get user details and reconciliation status
+kubectl get user john-doe -o yaml
+
+# Check user status
+kubectl get user john-doe -o jsonpath='{.status.conditions[*].message}'
+# Output: Successfully created 8 RoleBindings
+
+# Update user roles
+kubectl edit user john-doe
+
+# Delete user (removes all RoleBindings)
+kubectl delete user john-doe
+```
+
 ## ArgoCD RBAC
+
+ArgoCD RBAC is **managed automatically** by the RBAC Operator via the `argocd-rbac-cm` ConfigMap. Users assigned to roles in User CRDs automatically receive matching ArgoCD permissions.
+
+**Configuration**: `system/helmfile/rbac-system/rbac-operator/files/rbac-service.py` (lines 374-455)
 
 ### Projects
 
@@ -92,7 +257,7 @@ Managed by application developers:
 
 **Use Case**: Day-to-day application development, debugging, and deployments
 
-**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 85-101
+**Configuration**: Auto-generated by RBAC Operator
 
 ```yaml
 # Can work with apps in the 'apps' project only
@@ -102,14 +267,9 @@ p, role:app-developer, applications, override, apps/*, allow
 p, role:app-developer, applications, action/*, apps/*, allow
 p, role:app-developer, logs, get, apps/*, allow
 p, role:app-developer, exec, create, apps/*, allow
-
-# Cannot create/delete applications
-p, role:app-developer, applications, create, *, deny
-p, role:app-developer, applications, delete, *, deny
-
-# Cannot access default project (platform/system apps)
-p, role:app-developer, applications, *, default/*, deny
 ```
+
+**Note**: Users should only be assigned ONE ArgoCD role. The operator automatically assigns the highest role from the User CRD.
 
 #### Platform Operator (`role:platform-operator`)
 
@@ -128,7 +288,7 @@ p, role:app-developer, applications, *, default/*, deny
 
 **Use Case**: Managing application lifecycle, onboarding new services, platform troubleshooting
 
-**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 103-126
+**Configuration**: Auto-generated by RBAC Operator
 
 ```yaml
 # Full access to apps project
@@ -138,8 +298,6 @@ p, role:platform-operator, exec, create, */*, allow
 
 # Can view default project apps (but not modify)
 p, role:platform-operator, applications, get, default/*, allow
-p, role:platform-operator, applications, sync, default/*, deny
-p, role:platform-operator, applications, delete, default/*, deny
 
 # Can manage projects and repositories
 p, role:platform-operator, projects, get, *, allow
@@ -148,10 +306,6 @@ p, role:platform-operator, projects, update, *, allow
 p, role:platform-operator, repositories, get, *, allow
 p, role:platform-operator, repositories, create, *, allow
 p, role:platform-operator, repositories, update, *, allow
-
-# Cannot delete critical projects
-p, role:platform-operator, projects, delete, default, deny
-p, role:platform-operator, projects, delete, apps, deny
 ```
 
 #### System Administrator (`role:system-admin`)
@@ -167,7 +321,7 @@ p, role:platform-operator, projects, delete, apps, deny
 
 **Use Case**: Infrastructure management, system upgrades, security patching
 
-**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 128-143
+**Configuration**: Auto-generated by RBAC Operator
 
 ```yaml
 # Full access to all projects and ArgoCD management
@@ -180,9 +334,6 @@ p, role:system-admin, certificates, *, *, allow
 p, role:system-admin, gpgkeys, *, *, allow
 p, role:system-admin, accounts, get, *, allow
 p, role:system-admin, accounts, update, *, allow
-
-# Cannot delete clusters
-p, role:system-admin, clusters, delete, *, deny
 ```
 
 #### Cluster Admin (`role:cluster-admin`)
@@ -194,7 +345,7 @@ p, role:system-admin, clusters, delete, *, deny
 
 **Use Case**: Break-glass only, emergency access, should be audited
 
-**Configuration**: `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 145-149
+**Configuration**: Auto-generated by RBAC Operator
 
 ```yaml
 # Break-glass full access
@@ -221,12 +372,14 @@ p, role:cluster-admin, *, *, *, allow
 
 **Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-app-developer.yaml`
 
-**Assigned Namespaces** (via RoleBindings):
-- `homelab-docs`
-- `dev-retroboard`, `dev-retroboard-api`
-- `prod-retroboard`, `prod-retroboard-api`
-- `temperature-monitor`, `temperature-monitor-api`
-- `secret-editor`
+**ClusterRole Annotations:**
+```yaml
+annotations:
+  zengarden.space/role: app-developer
+  zengarden.space/namespaces: "@argocd"
+```
+
+The `@argocd` token automatically expands to all namespaces where ArgoCD Applications are deployed. The RBAC Operator creates RoleBindings dynamically.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -277,9 +430,14 @@ rules:
 
 **Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-platform-operator.yaml`
 
-**Assigned Namespaces** (via RoleBindings):
-- All application namespaces
-- All platform namespaces (`argocd`, `gitea`, `metabase`, `victoria-metrics`)
+**ClusterRole Annotations:**
+```yaml
+annotations:
+  zengarden.space/role: platform-operator
+  zengarden.space/namespaces: "@argocd,argocd,gitea,metabase,victoria-metrics"
+```
+
+Combines dynamic discovery (`@argocd` = all application namespaces) with static platform namespaces.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -309,7 +467,7 @@ rules:
 
 #### `homelab:system-admin`
 
-**Scope**: Cluster-wide (ClusterRoleBinding)
+**Scope**: Multiple namespaces (via RoleBindings in application, platform, and system namespaces)
 
 **Permissions:**
 - Full access to all namespaced resources
@@ -320,7 +478,16 @@ rules:
 **Restrictions:**
 - Cannot delete critical ClusterRoles or ClusterRoleBindings
 
-**Configuration**: `system/helmfile/rbac/manifests/templates/rbac-system-admin.yaml`
+**Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-system-admin.yaml`
+
+**ClusterRole Annotations:**
+```yaml
+annotations:
+  zengarden.space/role: system-admin
+  zengarden.space/namespaces: "@argocd,argocd,gitea,metabase,victoria-metrics,cert-manager,secrets-system,metallb-system,ingress-nginx,external-dns,external-tunnel,cnpg-system,cilium-secrets,integrations,secrets"
+```
+
+Includes all application (`@argocd`), platform, and system namespaces.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -369,7 +536,7 @@ rules:
 
 **Restrictions**: None (break-glass role)
 
-**Configuration**: `system/helmfile/rbac/manifests/templates/rbac-cluster-admin.yaml`
+**Configuration**: `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-cluster-admin.yaml`
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -420,25 +587,11 @@ rules:
 
 ## User Assignment
 
-### ArgoCD Role Assignment
+### Unified User Management
 
-Edit `platform/helmfile/argocd/helmfile.yaml.gotmpl` lines 154-159:
+**Single Source of Truth**: User CRDs automatically manage both Kubernetes and ArgoCD access.
 
-```yaml
-# Role Assignments
-g, oleksiy.pylypenko@gmail.com, role:cluster-admin
-
-# Example assignments:
-# g, developer@example.com, role:app-developer
-# g, platformeng@example.com, role:platform-operator
-# g, sysadmin@example.com, role:system-admin
-```
-
-### Kubernetes Role Assignment
-
-**Recommended: Use RBAC Operator**
-
-The RBAC Operator automates RoleBinding creation based on User CRDs. See [RBAC Operator](/operations/rbac-operator) for details.
+Create a User CRD:
 
 ```yaml
 apiVersion: zengarden.space/v1
@@ -448,48 +601,66 @@ metadata:
 spec:
   email: john.doe@example.com
   roles:
-    - app-developer
+    - app-developer    # Can have multiple roles for K8s namespaces
   enabled: true
 ```
 
-This automatically creates RoleBindings in appropriate namespaces.
-
-**Alternative: Manual Assignment (Legacy)**
-
-Edit the respective RBAC YAML files and add users/groups to the `subjects` field:
-
-**ClusterRoles**:
-- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-app-developer.yaml`
-- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-platform-operator.yaml`
-
-**System Roles**:
-- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-system-admin.yaml`
-- `system/helmfile/rbac-system/cluster-roles/manifests/templates/rbac-cluster-admin.yaml`
-
-Example:
-```yaml
-subjects:
-  - kind: User
-    name: developer@example.com
-  - kind: Group
-    name: developers
+```bash
+kubectl apply -f user.yaml
 ```
 
-**Note:** Manual RoleBindings should be migrated to the RBAC Operator for automated management.
+This **automatically**:
+1. Creates Kubernetes RoleBindings in appropriate namespaces
+2. Updates ArgoCD `argocd-rbac-cm` ConfigMap
+3. Grants matching permissions in both systems
+
+### Managing Users
+
+```bash
+# List all users
+kubectl get users
+
+# Get user details and status
+kubectl get user john-doe -o yaml
+
+# Disable user (removes all access)
+kubectl patch user john-doe --type=merge -p '{"spec":{"enabled":false}}'
+
+# Update user roles
+kubectl edit user john-doe
+
+# Delete user (removes all RoleBindings)
+kubectl delete user john-doe
+```
+
+### Cluster Admin Assignment
+
+The cluster admin email is configured in `system/helmfile/rbac-system/env.yaml`:
+
+```yaml
+clusterAdminEmail: oleksiy.pylypenko@gmail.com
+```
+
+This creates a static ClusterRoleBinding with unrestricted cluster access.
+
+See [RBAC Operator](/operations/rbac-operator) for detailed documentation on User CRD management.
 
 ## Deployment
 
-### Deploy RBAC Configuration
+### Deploy RBAC System
 
 ```bash
-# 1. Deploy platform components (includes ArgoCD + platform RBAC)
-cd /Users/oleksiyp/dev/homelab/platform/helmfile
-helmfile sync
-
-# 2. Deploy system components (includes system RBAC)
+# Deploy system components (includes RBAC system)
 cd /Users/oleksiyp/dev/homelab/system/helmfile
 helmfile sync
 ```
+
+This deploys:
+1. **ClusterRoles** with namespace annotations
+2. **User CRD** definition
+3. **RBAC Operator** for automated management
+
+No manual namespace labeling required - the operator handles everything automatically.
 
 ### Move Existing Apps to `apps` Project
 
@@ -502,6 +673,56 @@ argocd app set hemelab.prod.retroboard-api --project apps --grpc-web
 
 # Verify project assignment
 argocd app list --grpc-web
+```
+
+## Monitoring
+
+### Check Operator Status
+
+```bash
+# Check operator pod
+kubectl get pods -n rbac-system -l app.kubernetes.io/name=rbac-operator
+
+# Expected output:
+# NAME              READY   STATUS    RESTARTS   AGE
+# rbac-operator-0   2/2     Running   0          5m
+```
+
+### View Operator Logs
+
+```bash
+# View RBAC service logs (main reconciliation logic)
+kubectl logs -n rbac-system -l app.kubernetes.io/name=rbac-operator -c rbac-service -f
+
+# View shell-operator logs (watch events)
+kubectl logs -n rbac-system -l app.kubernetes.io/name=rbac-operator -c operator -f
+```
+
+### Check Reconciliation Status
+
+```bash
+# Check all users
+kubectl get users
+
+# Example output:
+# NAME         EMAIL                   ROLES                  ENABLED   AGE
+# john-doe     john.doe@example.com    ["app-developer"]      true      10m
+# admin-user   admin@example.com       ["system-admin"]       true      5m
+
+# Check user status details
+kubectl get user john-doe -o yaml | grep -A 10 status:
+```
+
+### Force Reconciliation
+
+To trigger immediate reconciliation:
+
+```bash
+# Restart the operator
+kubectl rollout restart statefulset/rbac-operator -n rbac-system
+
+# Or add annotation to user
+kubectl annotate user john-doe reconcile=now-$(date +%s)
 ```
 
 ## Verification
@@ -531,16 +752,35 @@ argocd account can-i create projects '*'
 ### Verify Kubernetes RBAC
 
 ```bash
+# Check User CRDs
+kubectl get users
+
+# Check user status
+kubectl get user john-doe -o yaml
+
+# Check operator-managed RoleBindings
+kubectl get rolebindings -A -l app.kubernetes.io/managed-by=rbac-operator
+
 # Check ClusterRoles
 kubectl get clusterroles | grep homelab
-
-# Check RoleBindings in application namespaces
-kubectl get rolebindings -A | grep homelab
 
 # Test permissions (as specific user via impersonation)
 kubectl auth can-i get pods -n dev-retroboard --as=developer@example.com
 kubectl auth can-i delete secrets -n integrations --as=platformeng@example.com
 kubectl auth can-i create clusterroles --as=sysadmin@example.com
+```
+
+### Verify ArgoCD RBAC ConfigMap
+
+```bash
+# Check ArgoCD RBAC ConfigMap
+kubectl get configmap argocd-rbac-cm -n argocd -o yaml
+
+# Verify user assignments
+kubectl get configmap argocd-rbac-cm -n argocd -o jsonpath='{.data.policy\.csv}' | grep "^g,"
+
+# Check scopes configuration
+kubectl get configmap argocd-rbac-cm -n argocd -o jsonpath='{.data.scopes}'
 ```
 
 ## Best Practices
@@ -559,9 +799,45 @@ All changes should go through Git commits and ArgoCD sync. Direct `kubectl` acce
 
 ### Regular Audits
 Review role assignments and permissions quarterly:
+
+```bash
+# List all users
+kubectl get users
+
+# Check who has elevated roles
+kubectl get users -o jsonpath='{range .items[?(@.spec.roles[*]=="system-admin")]}{.metadata.name}: {.spec.email}{"\n"}{end}'
+
+# Review RoleBindings
+kubectl get rolebindings -A -l app.kubernetes.io/managed-by=rbac-operator
+```
+
+Questions to answer:
 - Are users still in the appropriate role?
-- Are there unused service accounts?
+- Are there unused or disabled users?
 - Are RBAC policies still aligned with responsibilities?
+
+### User Naming Convention
+
+Use lowercase, hyphenated names matching email prefix:
+
+```yaml
+# Good
+name: john-doe
+email: john.doe@example.com
+
+# Bad
+name: JohnDoe
+email: john.doe@example.com
+```
+
+### Role Assignment Strategy
+
+Follow the principle of least privilege:
+
+1. Start with `app-developer` for most users
+2. Promote to `platform-operator` only when needed
+3. Reserve `system-admin` for infrastructure team
+4. Never assign `cluster-admin` via User CRD (use static ClusterRoleBinding)
 
 ### Break-glass Process
 Cluster Admin access should be:
@@ -571,12 +847,69 @@ Cluster Admin access should be:
 
 ## Troubleshooting
 
+### RoleBindings Not Created
+
+**Check User status:**
+```bash
+kubectl get user john-doe -o yaml
+```
+
+Look for error in `status.conditions`:
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "False"
+    reason: ReconciliationFailed
+    message: "ClusterRole homelab:app-developer not found"
+```
+
+**Verify ClusterRoles exist:**
+```bash
+kubectl get clusterrole homelab:app-developer
+kubectl get clusterrole homelab:platform-operator
+kubectl get clusterrole homelab:system-admin
+```
+
+If missing, deploy RBAC system:
+```bash
+cd ~/dev/homelab/system/helmfile
+helmfile sync
+```
+
+**Verify ArgoCD Applications exist:**
+```bash
+kubectl get applications -A
+```
+
+### Operator Not Starting
+
+**Check pod status:**
+```bash
+kubectl get pods -n rbac-system -l app.kubernetes.io/name=rbac-operator
+```
+
+**Check logs:**
+```bash
+# Shell-operator logs
+kubectl logs -n rbac-system rbac-operator-0 -c operator
+
+# Python service logs
+kubectl logs -n rbac-system rbac-operator-0 -c rbac-service
+```
+
+**Common issues:**
+- Missing ServiceAccount permissions
+- Failed to install Python dependencies
+- Cannot connect to Kubernetes API
+
 ### "Permission Denied" in ArgoCD
 
 **Check:**
-1. User's role assignment in `helmfile.yaml.gotmpl` line 154
-2. Application's project assignment (`argocd app get <app> --grpc-web`)
-3. RBAC policy rules for the role (lines 85-149)
+1. User CRD exists and is enabled
+2. ArgoCD RBAC ConfigMap has user assignment (`kubectl get cm argocd-rbac-cm -n argocd`)
+3. Application's project assignment (`argocd app get <app> --grpc-web`)
+4. User email matches OIDC token (`userIdKey: email` in dex config)
 
 **Debug:**
 ```bash
@@ -585,6 +918,9 @@ argocd account get-user-info --grpc-web
 
 # Check what user can do
 argocd account can-i sync applications 'apps/*' --grpc-web
+
+# Verify user in ArgoCD RBAC policy
+kubectl get cm argocd-rbac-cm -n argocd -o jsonpath='{.data.policy\.csv}' | grep user@example.com
 ```
 
 ### "Forbidden" in kubectl
@@ -691,50 +1027,74 @@ kube-apiserver-arg:
   - "oidc-groups-claim=groups"
 ```
 
-ArgoCD also uses Google OAuth (configured in `helmfile.yaml.gotmpl`):
+ArgoCD also uses Google OAuth with OIDC (configured in `platform/helmfile/argocd/helmfile.yaml.gotmpl`):
 
 ```yaml
 dex.config: |
   connectors:
-    - type: google
+    - type: oidc
       id: google
       name: Google
       config:
+        issuer: https://accounts.google.com
         clientID: $argocd-google-oauth:clientId
         clientSecret: $argocd-google-oauth:clientSecret
+        # Use email claim as username for RBAC matching
+        userIdKey: email
 ```
 
-## RBAC Automation
+The `userIdKey: email` configuration ensures ArgoCD uses the user's email address (not numeric Google ID) for RBAC policy matching.
 
-For automated RoleBinding management, see [RBAC Operator](/operations/rbac-operator).
+## RBAC System Components
 
-The RBAC Operator:
-- Automatically creates RoleBindings based on User CRDs
-- Discovers namespaces from ArgoCD Applications
-- Eliminates manual RoleBinding configuration
-- Provides single source of truth for user access
+The unified RBAC system (`system/helmfile/rbac-system`) consists of:
+
+### 1. ClusterRoles (`cluster-roles/`)
+- Defines all 4 ClusterRoles with permissions
+- Uses annotations to specify target namespaces
+- Supports `@argocd` token for dynamic namespace discovery
+- No manual namespace labeling required
+
+### 2. User CRD (`rbac-crds/`)
+- Custom resource for defining users and their roles
+- Single source of truth for access control
+- Supports multiple roles per user (for Kubernetes)
+- Enable/disable user access with `enabled` field
+
+### 3. RBAC Operator (`rbac-operator/`)
+- Watches User CRDs, ClusterRoles, and ArgoCD Applications
+- Automatically creates/updates Kubernetes RoleBindings
+- Syncs ArgoCD RBAC ConfigMap (`argocd-rbac-cm`)
+- Reconciles every 5 minutes + on-demand
+- Assigns highest role to users in ArgoCD (avoiding conflicts)
 
 ## Related Documentation
 
-- [RBAC Operator](/operations/rbac-operator) - Automated RoleBinding management
-- [Security](/introduction/security) - Full security architecture
+- [Security](/introduction/security) - Full security architecture and defense-in-depth
 - [Deployment](/deployment) - Initial setup instructions
-- [Monitoring](/operations/monitoring) - Security event detection
-- [Maintenance](/operations/maintenance) - Regular RBAC audits
+- [Monitoring](/operations/monitoring) - Security event detection and alerting
+- [Maintenance](/operations/maintenance) - Regular RBAC audits and system maintenance
 
 ## Conclusion
 
-This RBAC implementation provides:
+The unified RBAC system provides:
 
-1. **Granular permissions** via four-tier role model
-2. **Namespace-based segregation** (apps, platform, system)
-3. **Project-based isolation** in ArgoCD
-4. **Secret access control** (read-only for developers, restricted write)
-5. **Audit trail** for all access decisions
-6. **Break-glass access** for emergencies
+1. **Single Source of Truth**: User CRDs define all access across Kubernetes and ArgoCD
+2. **Full Automation**: RoleBindings and ArgoCD policies managed automatically
+3. **Dynamic Discovery**: Namespaces discovered from ArgoCD Applications (no manual labeling)
+4. **Granular Permissions**: Four-tier role model with clear escalation paths
+5. **Namespace Segregation**: Application, platform, and system isolation
+6. **Audit Trail**: All changes tracked via User status and operator logs
+7. **GitOps Friendly**: User CRDs can be version controlled and managed via GitOps
+
+**Key Benefits:**
+- **Reduces operational overhead**: Eliminates manual RoleBinding configuration
+- **Ensures consistency**: Same permissions across all matching namespaces
+- **Scales automatically**: New applications get RoleBindings automatically
+- **Maintains security**: Principle of least privilege enforced through role hierarchy
 
 RBAC is **layered with other security controls** to provide defense-in-depth protection for the homelab infrastructure.
 
 ---
 
-*RBAC is not just about permissions—it's about accountability, auditability, and limiting blast radius.*
+*RBAC is not just about permissions—it's about accountability, auditability, and limiting blast radius through automation.*
