@@ -1,0 +1,15 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: {{ include "service.fullname" . }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics
+      scrapeTimeout: 10s
+{{- end }}

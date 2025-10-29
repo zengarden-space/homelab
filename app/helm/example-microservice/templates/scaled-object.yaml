@@ -1,0 +1,43 @@
+{{- if .Values.autoscaling.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "service.fullname" . }}
+spec:
+  scaleTargetRef:
+    name: {{ include "service.fullname" . }}
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 180
+
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 120
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Percent
+              value: 50
+              periodSeconds: 30
+            - type: Pods
+              value: 1
+              periodSeconds: 30
+          selectPolicy: Max
+
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.autoscaling.keda.prometheus | quote }}
+        metricName: awaiting_listeners
+        threshold: {{ .Values.autoscaling.keda.awaitingListenersThreshold }}
+        query: |
+          sum(board_event_awaiting_listeners{service="retroboard-api"}) /
+          count(up{service="retroboard-api"})
+{{- end }}

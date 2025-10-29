@@ -1,0 +1,33 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: retroboard-psql
+spec:
+  instances: 1
+  storage:
+    size: 20Gi
+  managed:
+    roles:
+      - name: {{ .Values.postgresql.user | quote }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ .Values.postgresql.user | quote }}
+      - name: {{ .Values.postgresql.ownerUser | quote }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ .Values.postgresql.ownerUser | quote }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: retroboard-db
+spec:
+  name: {{ .Values.postgresql.dbName | quote }}
+  owner: {{ .Values.postgresql.ownerUser | quote }}
+  cluster:
+    name: retroboard-psql
+  extensions:
+    - name: uuid-ossp
+      ensure: present

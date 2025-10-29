@@ -1,0 +1,134 @@
+# Default values for retroboard-api
+replicaCount: 2
+
+image:
+  repository: gitea.homelab.int.zengarden.space/zengarden-space/retroboard-api
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 2000
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+  keda:
+    enabled: false
+    prometheus: http://vmsingle-vm-victoria-metrics-k8s-stack.victoria-metrics.svc.cluster.local.:8429
+    awaitingListenersThreshold: 3
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - retroboard-api
+        topologyKey: kubernetes.io/hostname
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+postgresql:
+  dbName: retroboard
+  user: retroboard
+  ownerUser: retroboard-owner
+
+  enabled: true
+  auth:
+    username: retroboard
+    database: retroboard
+    existingSecret: retroboard-api-postgresql
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+env:
+  DB_HOST: retroboard-psql-rw
+  DB_PORT: "5432"
+  DB_NAME: retroboard
+  DB_USER: retroboard
+
+envSecrets:
+  DB_PASSWORD: "{{ .retroboardDbUserPassword }}"
+  JWT_SECRET: "{{ .jwtSecret }}"
+  GOOGLE_CLIENT_ID: "{{ .googleClientId }}"
+  GOOGLE_CLIENT_SECRET: "{{ .googleClientSecret }}"
+
+externalSecrets:
+  secretStore: secrets
+  refreshInterval: 15s
+
+serviceMonitor:
+  enabled: false

@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "service.fullname" . }}-migration-{{ .Values.image.tag | default .Chart.AppVersion | replace "." "-" | replace "+" "-" }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "service.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "service.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-db
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: gitea.homelab.int.zengarden.space/zengarden-space/external-images/postgres:15-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do
+                echo "Waiting for PostgreSQL to be ready..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready!"
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: retroboard-psql-app
+                  key: host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: retroboard-psql-app
+                  key: port
+            - name: DB_USER
+              value: {{ .Values.postgresql.ownerUser | quote }}
+      containers:
+        - name: migration
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/scripts/migrate.js", "up"]
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: retroboard-psql-app
+                  key: host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: retroboard-psql-app
+                  key: port
+            - name: DB_NAME
+              value: {{ .Values.postgresql.dbName | quote }}
+            - name: DB_USER
+              value: {{ .Values.postgresql.ownerUser | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.ownerUser | quote }}
+                  key: password
+            - name: NODE_ENV
+              value: "production"
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+  backoffLimit: 5
