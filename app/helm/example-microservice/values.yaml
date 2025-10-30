@@ -1,8 +1,8 @@
-# Default values for retroboard-api
+# Default values for example-microservice
 replicaCount: 2
 
 image:
-  repository: gitea.homelab.int.zengarden.space/zengarden-space/retroboard-api
+  repository: gitea.homelab.int.zengarden.space/zengarden-space/example-microservice
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -74,7 +74,7 @@ affinity:
           - key: app.kubernetes.io/name
             operator: In
             values:
-            - retroboard-api
+            - example-microservice
         topologyKey: kubernetes.io/hostname
 
 # Health checks
@@ -97,15 +97,15 @@ readinessProbe:
   failureThreshold: 3
 
 postgresql:
-  dbName: retroboard
-  user: retroboard
-  ownerUser: retroboard-owner
+  dbName: example-microservice
+  user: example-microservice
+  ownerUser: example-microservice-owner
 
   enabled: true
   auth:
-    username: retroboard
-    database: retroboard
-    existingSecret: retroboard-api-postgresql
+    username: example-microservice
+    database: example-microservice
+    existingSecret: example-microservice-postgresql
     secretKeys:
       adminPasswordKey: postgres-password
       userPasswordKey: password
@@ -115,16 +115,13 @@ postgresql:
       size: 8Gi
 
 env:
-  DB_HOST: retroboard-psql-rw
+  DB_HOST: example-microservice-psql-rw
   DB_PORT: "5432"
-  DB_NAME: retroboard
-  DB_USER: retroboard
+  DB_NAME: example-microservice
+  DB_USER: example-microservice
 
 envSecrets:
-  DB_PASSWORD: "{{ .retroboardDbUserPassword }}"
-  JWT_SECRET: "{{ .jwtSecret }}"
-  GOOGLE_CLIENT_ID: "{{ .googleClientId }}"
-  GOOGLE_CLIENT_SECRET: "{{ .googleClientSecret }}"
+  DB_PASSWORD: "{{ .exampleMicroserviceDbUserPassword }}"
 
 externalSecrets:
   secretStore: secrets

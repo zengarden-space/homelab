@@ -17,6 +17,8 @@ spec:
       server: {{ .Values.application.destinationServer }}
     - namespace: dev-*
       server: {{ .Values.application.destinationServer }}
+    - namespace: ci-*
+      server: {{ .Values.application.destinationServer }}
 
     # Secrets namespace (for DerivedSecret CRDs)
     - namespace: secrets

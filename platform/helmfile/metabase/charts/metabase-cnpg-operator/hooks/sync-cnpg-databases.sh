@@ -382,7 +382,7 @@ process_events() {
   log "DEBUG: Binding context: $binding_context"
 
   # Handle scheduled reconciliation
-  if echo "$binding_context" | jq -e '.[0].binding == "schedule"' >/dev/null 2>&1; then
+  if echo "$binding_context" | jq -e '.[0].type == "Schedule"' >/dev/null 2>&1; then
     log "Running scheduled reconciliation..."
 
     # Get all CNPG databases

@@ -1,16 +1,6 @@
 apiVersion: v2
-name: retroboard-api
-description: A Helm chart for retroboard-api server
+name: example-microservice
+description: A Helm chart for example-microservice server
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
-keywords:
-  - typescript
-  - backend
-  - api
-home: https://github.com/zengarden-space/retroboard-api
-sources:
-  - https://github.com/zengarden-space/retroboard
-maintainers:
-  - name: Development Team
-    email: dev@zengarden.space

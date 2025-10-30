@@ -38,6 +38,6 @@ spec:
         metricName: awaiting_listeners
         threshold: {{ .Values.autoscaling.keda.awaitingListenersThreshold }}
         query: |
-          sum(board_event_awaiting_listeners{service="retroboard-api"}) /
-          count(up{service="retroboard-api"})
+          sum(board_event_awaiting_listeners{service="example-microservice"}) /
+          count(up{service="example-microservice"})
 {{- end }}

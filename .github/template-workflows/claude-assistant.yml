@@ -1,0 +1,29 @@
+name: Claude Assistant
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-response:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read # Add this line
+    if: github.server_url == 'https://gitea.homelab.int.zengarden.space'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: markwylde/claude-code-gitea-action@v1.0.20
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          additional_permissions: |-
+            actions: read
+          claude_git_name: Claude
+          claude_git_email: claude@anthropic.com
+          model: claude-sonnet-4-5-20250929
+          direct_prompt: |
+            Please provide a review of this pull request, be precise and brief.
+            Request changes if you feel the code does not meet the standards.
+            Pay extra attention to coding standards, security practices,
+            and test coverage.

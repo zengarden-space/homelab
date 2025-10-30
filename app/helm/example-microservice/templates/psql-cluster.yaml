@@ -1,7 +1,7 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: retroboard-psql
+  name: example-microservice-psql
 spec:
   instances: 1
   storage:
@@ -22,12 +22,12 @@ spec:
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
-  name: retroboard-db
+  name: example-microservice-db
 spec:
   name: {{ .Values.postgresql.dbName | quote }}
   owner: {{ .Values.postgresql.ownerUser | quote }}
   cluster:
-    name: retroboard-psql
+    name: example-microservice-psql
   extensions:
     - name: uuid-ossp
       ensure: present

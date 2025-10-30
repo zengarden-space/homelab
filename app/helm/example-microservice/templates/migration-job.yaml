@@ -38,12 +38,12 @@ spec:
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:
-                  name: retroboard-psql-app
+                  name: example-microservice-psql-app
                   key: host
             - name: DB_PORT
               valueFrom:
                 secretKeyRef:
-                  name: retroboard-psql-app
+                  name: example-microservice-psql-app
                   key: port
             - name: DB_USER
               value: {{ .Values.postgresql.ownerUser | quote }}
@@ -58,12 +58,12 @@ spec:
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:
-                  name: retroboard-psql-app
+                  name: example-microservice-psql-app
                   key: host
             - name: DB_PORT
               valueFrom:
                 secretKeyRef:
-                  name: retroboard-psql-app
+                  name: example-microservice-psql-app
                   key: port
             - name: DB_NAME
               value: {{ .Values.postgresql.dbName | quote }}
