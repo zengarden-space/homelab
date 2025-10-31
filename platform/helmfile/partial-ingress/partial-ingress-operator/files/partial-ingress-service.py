@@ -69,13 +69,13 @@ class PartialIngressService:
                 seen[key] = host
         return list(seen.values())
 
-    def find_base_ingresses(self, base_host, ingress_class_name):
-        """Find all Ingress resources matching baseHost and ingressClassName"""
+    def find_base_ingresses(self, base_host, ingress_class_name, namespace):
+        """Find all Ingress resources matching baseHost and ingressClassName in a specific namespace"""
         try:
-            all_ingresses = self.networking_v1.list_ingress_for_all_namespaces()
+            namespace_ingresses = self.networking_v1.list_namespaced_ingress(namespace=namespace)
             matching = []
 
-            for ing in all_ingresses.items:
+            for ing in namespace_ingresses.items:
                 # Check ingressClassName
                 if ing.spec.ingress_class_name != ingress_class_name:
                     continue
@@ -89,7 +89,7 @@ class PartialIngressService:
 
             return matching
         except ApiException as e:
-            print(f"ERROR: Failed to list Ingresses: {e}", file=sys.stderr)
+            print(f"ERROR: Failed to list Ingresses in namespace {namespace}: {e}", file=sys.stderr)
             raise
 
     def find_matching_partial_ingresses(self, host_pattern):
@@ -153,6 +153,53 @@ class PartialIngressService:
         # Simple string comparison for now
         # TODO: Handle more complex path matching (Prefix vs Exact)
         return path in overridden_paths
+
+    def build_path_override_map(self, hostname, ingress_class_name):
+        """
+        Build a set of all paths provided by ALL PartialIngresses for a specific hostname.
+        Returns a set of path strings.
+        """
+        try:
+            all_partial_ingresses = self.custom_api.list_cluster_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                plural='partialingresses'
+            ).get('items', [])
+
+            overridden_paths = set()
+
+            for pi in all_partial_ingresses:
+                # Skip if being deleted
+                if pi.get('metadata', {}).get('deletionTimestamp'):
+                    continue
+
+                pi_spec = pi.get('spec', {})
+                pi_class = pi_spec.get('ingressClassName')
+
+                # Only consider PartialIngresses with matching hostname and ingressClassName
+                if pi_class != ingress_class_name:
+                    continue
+
+                pi_rules = pi_spec.get('rules', [])
+                for rule in pi_rules:
+                    pi_hostname = rule.get('host', '')
+                    # Exact hostname match
+                    if pi_hostname == hostname:
+                        # Extract all paths from this PartialIngress
+                        http = rule.get('http', {})
+                        paths_list = http.get('paths', [])
+                        for path_obj in paths_list:
+                            path = path_obj.get('path', '/')
+                            overridden_paths.add(path)
+                        break
+
+            return overridden_paths
+
+        except ApiException as e:
+            if e.status == 404:
+                return set()
+            print(f"ERROR: Failed to build path override map: {e}", file=sys.stderr)
+            raise
 
     def process_partial_ingress(self, binding_context):
         """Process a PartialIngress event from binding context"""
@@ -245,22 +292,23 @@ class PartialIngressService:
 
             print(f"  Matched CompositeIngressHost: baseHost={base_host}, pattern={host_pattern}", flush=True)
 
-            # Find base Ingresses
-            base_ingresses = self.find_base_ingresses(base_host, cih_ingress_class)
-            print(f"  Found {len(base_ingresses)} base Ingresses", flush=True)
+            # Find base Ingresses in the same namespace as CompositeIngressHost
+            cih_namespace = cih_metadata.get('namespace')
+            base_ingresses = self.find_base_ingresses(base_host, cih_ingress_class, cih_namespace)
+            print(f"  Found {len(base_ingresses)} base Ingresses in {cih_namespace}", flush=True)
 
-            # Extract paths provided by this PartialIngress
-            overridden_paths = self.extract_paths_from_partial_ingress(obj)
-            print(f"  Overridden paths: {overridden_paths}", flush=True)
+            # Build path override map for this hostname from ALL PartialIngresses
+            all_overridden_paths = self.build_path_override_map(hostname, ingress_class_name)
+            print(f"  Paths provided by ALL PartialIngresses for {hostname}: {all_overridden_paths}", flush=True)
 
             # Replicate non-overridden Ingresses (owned by CompositeIngressHost)
             for base_ing in base_ingresses:
                 base_paths = self.extract_paths_from_ingress(base_ing)
 
-                # Check if any paths are NOT overridden
+                # Check if any paths are NOT overridden by ANY PartialIngress for this hostname
                 non_overridden_paths = [
                     p for p in base_paths
-                    if not self.is_path_overridden(p['path'], overridden_paths)
+                    if not self.is_path_overridden(p['path'], all_overridden_paths)
                 ]
 
                 if non_overridden_paths:
@@ -639,10 +687,10 @@ class PartialIngressService:
         print(f"Processing CompositeIngressHost: {namespace}/{name}", flush=True)
         print(f"  BaseHost: {base_host}", flush=True)
 
-        # Scan for base Ingresses
-        base_ingresses = self.find_base_ingresses(base_host, ingress_class_name)
+        # Scan for base Ingresses in the same namespace
+        base_ingresses = self.find_base_ingresses(base_host, ingress_class_name, namespace)
 
-        print(f"  Discovered {len(base_ingresses)} Ingresses", flush=True)
+        print(f"  Discovered {len(base_ingresses)} Ingresses in {namespace}", flush=True)
 
         # Update status
         self._update_composite_host_status(namespace, name, len(base_ingresses))
