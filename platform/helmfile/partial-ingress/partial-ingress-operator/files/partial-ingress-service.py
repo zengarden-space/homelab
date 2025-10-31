@@ -270,13 +270,12 @@ class PartialIngressService:
         # 1. Generate Ingress from PartialIngress in the same namespace (owned by PartialIngress)
         self._generate_ingress_from_partial(obj)
 
-        # 2. Find matching CompositeIngressHosts
+        # 2. Find matching CompositeIngressHosts (process ALL, no deduplication)
         all_composite_hosts = self.get_all_composite_ingress_hosts()
-        composite_hosts = self.deduplicate_composite_hosts(all_composite_hosts)
 
         replicated_ingresses = []
 
-        for composite_host in composite_hosts:
+        for composite_host in all_composite_hosts:
             cih_spec = composite_host.get('spec', {})
             cih_metadata = composite_host.get('metadata', {})
             base_host = cih_spec.get('baseHost')
