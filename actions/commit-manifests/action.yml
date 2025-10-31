@@ -1,0 +1,64 @@
+name: Commit Manifests
+description: Commit and push all changes in manifests repository
+
+inputs:
+  manifests-repo-path:
+    description: 'Path to checked-out manifests repository'
+    required: false
+    default: 'manifests-repo'
+  commit-message:
+    description: 'Commit message'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Commit and push changes
+      shell: bash
+      run: |
+        cd ${{ inputs.manifests-repo-path }}
+        git config --local user.name "Gitea Actions Bot"
+        git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+        # Add all changes
+        git add -A
+
+        # Retry loop for git operations
+        for attempt in {1..5}; do
+          echo "Attempt $attempt of 5"
+
+          # Pull latest changes
+          if ! git pull origin main; then
+            echo "Failed to pull on attempt $attempt"
+            continue
+          fi
+
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          # Commit changes
+          if ! git commit -m "${{ inputs.commit-message }}"; then
+            echo "Failed to commit on attempt $attempt"
+            git reset --hard HEAD
+            continue
+          fi
+
+          # Try to push
+          if git push origin main; then
+            echo "Successfully pushed on attempt $attempt"
+            exit 0
+          else
+            echo "Failed to push on attempt $attempt, discarding commit"
+            git reset --hard HEAD~1
+
+            if [ $attempt -eq 5 ]; then
+              echo "Failed to push after 5 attempts"
+              exit 1
+            fi
+
+            sleep $((attempt * 2))  # Exponential backoff
+          fi
+        done

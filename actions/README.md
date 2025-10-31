@@ -53,7 +53,88 @@ Converts rendered Ingress resources to PartialIngress for PR/branch environments
 - Removes TLS sections
 - Removes cert-manager and external-dns annotations
 
-### 4. push-manifests-with-cih
+### 4. cleanup-ci-environment
+
+Deletes CI environment manifest directory (file operations only). Used together with `commit-manifests` to clean up resources when a PR is closed.
+
+**Usage:**
+
+```yaml
+- name: Delete CI environment files
+  id: cleanup
+  uses: zengarden-space/homelab/actions/cleanup-ci-environment@main
+  with:
+    slug: ${{ github.head_ref }}  # Required: branch name
+    project-name: my-app  # Optional: defaults to repository name
+    cluster: homelab  # Optional: defaults to 'homelab'
+    manifests-repo-path: manifests-repo  # Optional: defaults to 'manifests-repo'
+```
+
+**Outputs:**
+- `environment-id`: Environment identifier (sha256 hash of slug, 8 chars)
+- `deleted`: Whether files were deleted (true/false)
+
+**Features:**
+- Calculates environment ID from slug (sha256 hash)
+- Deletes entire CI environment directory
+- Removes empty parent directories
+- File operations only (no git commit/push)
+
+**Typical workflow:**
+
+```yaml
+name: PR Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manifests repository
+        uses: actions/checkout@v4
+        with:
+          repository: zengarden-space/manifests
+          ref: main
+          path: manifests-repo
+          token: ${{ secrets.CONTENT_WRITE_TOKEN }}
+
+      - name: Delete CI environment files
+        id: cleanup
+        uses: zengarden-space/homelab/actions/cleanup-ci-environment@main
+        with:
+          slug: ${{ github.head_ref }}
+
+      - name: Commit and push changes
+        if: steps.cleanup.outputs.deleted == 'true'
+        uses: zengarden-space/homelab/actions/commit-manifests@main
+        with:
+          commit-message: "Cleanup CI environment ci-${{ steps.cleanup.outputs.environment-id }} for my-app"
+```
+
+### 5. commit-manifests
+
+Commits and pushes all changes in the manifests repository. Used after file modification actions like `cleanup-ci-environment`.
+
+**Usage:**
+
+```yaml
+- name: Commit and push changes
+  uses: zengarden-space/homelab/actions/commit-manifests@main
+  with:
+    manifests-repo-path: manifests-repo  # Optional: defaults to 'manifests-repo'
+    commit-message: "Update manifests"  # Required: commit message
+```
+
+**Features:**
+- Commits all changes in the repository (git add -A)
+- Automatic retry with exponential backoff (5 attempts)
+- Handles concurrent push conflicts
+- Skips commit if no changes detected
+
+### 6. push-manifests-with-cih
 
 Pushes manifests with optional CompositeIngressHost to the manifests repository. Supports both dev and CI environments.
 
@@ -74,7 +155,7 @@ Pushes manifests with optional CompositeIngressHost to the manifests repository.
 - Supports CI environments: `ci-pr-<number>`
 - Optional CompositeIngressHost deployment
 
-### 5. push-manifests
+### 7. push-manifests
 
 Pushes manifests directly to the main branch of the manifests repository. Used for dev environments with auto-deploy.
 
@@ -98,7 +179,7 @@ Pushes manifests directly to the main branch of the manifests repository. Used f
 - Handles concurrent push conflicts
 - Skip commit if no changes detected
 
-### 6. review-manifests
+### 8. review-manifests
 
 Creates a pull request in the manifests repository for review. Used for prod deployments requiring approval.
 
