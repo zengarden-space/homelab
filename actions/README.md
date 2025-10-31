@@ -8,23 +8,72 @@ Reusable GitHub Actions for managing Kubernetes manifests in the homelab environ
 
 Generates Kubernetes manifests from Helm charts using `helm template`.
 
+### 2. add-composite-ingress-host
+
+Creates a CompositeIngressHost YAML file for the PartialIngress operator. This defines the base environment and hostname pattern for partial deployments.
+
 **Usage:**
 
 ```yaml
-- name: Generate manifests
-  uses: zengarden-space/homelab/actions/generate-manifests@main
+- name: Generate CompositeIngressHost
+  uses: zengarden-space/homelab/actions/add-composite-ingress-host@main
   with:
-    environment: dev  # Required: dev or prod
-    project-name: my-app  # Optional: defaults to repository name
-    image-tag: sha-abc123  # Required: Docker image tag
-    cluster: homelab  # Optional: defaults to 'homelab'
+    base-host: "myapp.dev.homelab.int.zengarden.space"  # Required: base hostname
+    host-pattern: "myapp-*.homelab.int.zengarden.space"  # Required: pattern for PRs
+    ingress-class: internal  # Optional: defaults to 'internal'
+    output-file: compositeingresshost.yaml  # Optional: output file path
 ```
 
 **Outputs:**
-- `manifest-file`: Path to the generated manifest file
-- `project-name`: Resolved project name
+- `manifest-file`: Path to the generated CompositeIngressHost manifest
 
-### 2. push-manifests
+### 3. add-partial-ingress
+
+Converts rendered Ingress resources to PartialIngress for PR environments. Modifies hostnames and removes TLS configuration.
+
+**Usage:**
+
+```yaml
+- name: Convert to PartialIngress
+  uses: zengarden-space/homelab/actions/add-partial-ingress@main
+  with:
+    pr-number: ${{ github.event.pull_request.number }}  # Required: PR number
+    manifest-file: manifest-dev.yaml  # Required: manifest to modify
+    base-domain: dev.homelab.int.zengarden.space  # Optional: domain to replace
+```
+
+**Outputs:**
+- `manifest-file`: Path to modified manifest with PartialIngress
+- `pr-id`: PR identifier used in hostnames (e.g., "pr-123")
+
+**Transformations:**
+- `Ingress` → `PartialIngress` (apiVersion: networking.zengarden.space/v1)
+- `myapp.dev.domain` → `myapp-pr-123.domain`
+- Removes TLS sections
+- Removes cert-manager and external-dns annotations
+
+### 4. push-manifests-with-cih
+
+Pushes manifests with optional CompositeIngressHost to the manifests repository. Supports both dev and CI environments.
+
+**Usage:**
+
+```yaml
+- name: Push to dev with CIH
+  uses: zengarden-space/homelab/actions/push-manifests-with-cih@main
+  with:
+    environment: dev  # Required: dev, ci-pr-123, prod
+    manifest-file: manifest.yaml  # Required: main manifest
+    cih-file: compositeingresshost.yaml  # Optional: CIH manifest
+    token: ${{ secrets.CONTENT_WRITE_TOKEN }}  # Required
+```
+
+**Features:**
+- Automatic retry with exponential backoff
+- Supports CI environments: `ci-pr-<number>`
+- Optional CompositeIngressHost deployment
+
+### 5. push-manifests
 
 Pushes manifests directly to the main branch of the manifests repository. Used for dev environments with auto-deploy.
 
@@ -48,7 +97,7 @@ Pushes manifests directly to the main branch of the manifests repository. Used f
 - Handles concurrent push conflicts
 - Skip commit if no changes detected
 
-### 3. review-manifests
+### 6. review-manifests
 
 Creates a pull request in the manifests repository for review. Used for prod deployments requiring approval.
 
@@ -77,21 +126,25 @@ Creates a pull request in the manifests repository for review. Used for prod dep
 - Force-pushes to update existing branch
 - Auto-generates PR title and description
 
-## Complete Workflow Example
+## Complete Workflow Examples
+
+### Standard Workflow (dev + prod)
 
 ```yaml
 name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
   REGISTRY: 'gitea.homelab.int.zengarden.space'
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -104,16 +157,18 @@ jobs:
         uses: zengarden-space/homelab/actions/generate-manifests@main
         with:
           environment: dev
-          image-tag: ${{ steps.meta.outputs.tag }}
+          image-tag: ${{ steps.extract-tag.outputs.tag }}
 
       - name: Generate prod manifests
+        if: github.ref == 'refs/heads/main'
         id: gen-prod
         uses: zengarden-space/homelab/actions/generate-manifests@main
         with:
           environment: prod
-          image-tag: ${{ steps.meta.outputs.tag }}
+          image-tag: ${{ steps.extract-tag.outputs.tag }}
 
       - name: Deploy to dev (auto)
+        if: github.ref == 'refs/heads/main'
         uses: zengarden-space/homelab/actions/push-manifests@main
         with:
           environment: dev
@@ -121,6 +176,99 @@ jobs:
           token: ${{ secrets.CONTENT_WRITE_TOKEN }}
 
       - name: Create prod review PR
+        if: github.ref == 'refs/heads/main'
+        uses: zengarden-space/homelab/actions/review-manifests@main
+        with:
+          environment: prod
+          manifest-file: ${{ steps.gen-prod.outputs.manifest-file }}
+          token: ${{ secrets.CONTENT_WRITE_TOKEN }}
+```
+
+### PartialIngress Workflow (dev + PR + prod)
+
+```yaml
+name: CI/CD Pipeline with PartialIngress
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: 'gitea.homelab.int.zengarden.space'
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ... Docker build, Helm lint, Trivy scan, etc ...
+
+      - name: Generate dev manifests
+        id: gen-dev
+        uses: zengarden-space/homelab/actions/generate-manifests@main
+        with:
+          environment: dev
+          image-tag: ${{ steps.extract-tag.outputs.tag }}
+
+      - name: Generate prod manifests
+        if: github.ref == 'refs/heads/main'
+        id: gen-prod
+        uses: zengarden-space/homelab/actions/generate-manifests@main
+        with:
+          environment: prod
+          image-tag: ${{ steps.extract-tag.outputs.tag }}
+
+      # Dev deployment with CompositeIngressHost
+      - name: Generate CompositeIngressHost for dev
+        if: github.ref == 'refs/heads/main'
+        id: gen-cih
+        uses: zengarden-space/homelab/actions/add-composite-ingress-host@main
+        with:
+          base-host: "myapp.dev.homelab.int.zengarden.space"
+          host-pattern: "myapp-*.homelab.int.zengarden.space"
+          ingress-class: "internal"
+
+      - name: Deploy to dev
+        if: github.ref == 'refs/heads/main'
+        uses: zengarden-space/homelab/actions/push-manifests-with-cih@main
+        with:
+          environment: dev
+          manifest-file: ${{ steps.gen-dev.outputs.manifest-file }}
+          cih-file: ${{ steps.gen-cih.outputs.manifest-file }}
+          token: ${{ secrets.CONTENT_WRITE_TOKEN }}
+
+      # PR deployment with PartialIngress
+      - name: Generate CI manifests for PR
+        if: github.event_name == 'pull_request'
+        id: gen-ci
+        run: |
+          cp ${{ steps.gen-dev.outputs.manifest-file }} manifest-ci.yaml
+          echo "manifest-file=manifest-ci.yaml" >> $GITHUB_OUTPUT
+
+      - name: Convert to PartialIngress for PR
+        if: github.event_name == 'pull_request'
+        id: partial-ingress
+        uses: zengarden-space/homelab/actions/add-partial-ingress@main
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          manifest-file: ${{ steps.gen-ci.outputs.manifest-file }}
+
+      - name: Deploy to CI environment
+        if: github.event_name == 'pull_request'
+        uses: zengarden-space/homelab/actions/push-manifests-with-cih@main
+        with:
+          environment: ci-${{ steps.partial-ingress.outputs.pr-id }}
+          manifest-file: ${{ steps.partial-ingress.outputs.manifest-file }}
+          token: ${{ secrets.CONTENT_WRITE_TOKEN }}
+
+      # Prod deployment via PR
+      - name: Create prod review PR
+        if: github.ref == 'refs/heads/main'
         uses: zengarden-space/homelab/actions/review-manifests@main
         with:
           environment: prod
@@ -134,16 +282,24 @@ Generated manifests are organized in the manifests repository as:
 
 ```
 manifests/
-└── {cluster}/
+└── {cluster}/                    # Default: homelab
     ├── dev/
     │   └── {project-name}/
-    │       └── manifest.yaml
+    │       ├── manifest.yaml              # Application resources
+    │       └── compositeingresshost.yaml  # Optional: for PartialIngress
+    ├── ci-pr-{number}/          # PR environments
+    │   └── {project-name}/
+    │       └── manifest.yaml              # PartialIngress resources
     └── prod/
         └── {project-name}/
-            └── manifest.yaml
+            └── manifest.yaml              # Production resources
 ```
 
-Default: `homelab/dev/{project}/manifest.yaml`
+**Examples:**
+- Dev: `homelab/dev/retroboard/manifest.yaml`
+- Dev CIH: `homelab/dev/retroboard/compositeingresshost.yaml`
+- PR: `homelab/ci-pr-123/retroboard/manifest.yaml`
+- Prod: `homelab/prod/retroboard/manifest.yaml`
 
 ## Required Secrets
 

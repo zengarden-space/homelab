@@ -1,0 +1,121 @@
+name: Add PartialIngress
+description: Convert rendered Ingress manifests to PartialIngress for PR environments
+
+inputs:
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  manifest-file:
+    description: 'Path to rendered manifest file (will be modified in-place)'
+    required: true
+  base-domain:
+    description: 'Base domain pattern to replace (e.g., "dev.homelab.int.zengarden.space")'
+    required: false
+    default: 'dev.homelab.int.zengarden.space'
+
+outputs:
+  manifest-file:
+    description: 'Path to modified manifest file with PartialIngress'
+    value: ${{ inputs.manifest-file }}
+  pr-id:
+    description: 'PR identifier used in hostnames'
+    value: ${{ steps.convert.outputs.pr-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Convert Ingress to PartialIngress
+      id: convert
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        manifest_file="${{ inputs.manifest-file }}"
+        pr_id="pr-${{ inputs.pr-number }}"
+        base_domain="${{ inputs.base-domain }}"
+
+        echo "Converting Ingress to PartialIngress in: $manifest_file"
+        echo "PR ID: $pr_id"
+        echo "Project: $project_name"
+        echo "Base domain: $base_domain"
+
+        # Create a Python script to do the conversion
+        cat > /tmp/convert-to-partial-ingress.py <<'PYTHON_EOF'
+        import yaml
+        import sys
+
+        pr_id = sys.argv[1]
+        base_domain = sys.argv[2]
+        manifest_file = sys.argv[3]
+
+        # Read all documents from the manifest
+        with open(manifest_file, 'r') as f:
+            documents = list(yaml.safe_load_all(f))
+
+        # Process each document
+        modified = False
+        for doc in documents:
+            if doc and doc.get('kind') == 'Ingress':
+                print(f"Found Ingress: {doc['metadata']['name']}")
+
+                # Convert to PartialIngress
+                doc['apiVersion'] = 'networking.zengarden.space/v1'
+                doc['kind'] = 'PartialIngress'
+
+                # Update hostnames in rules
+                if 'rules' in doc.get('spec', {}):
+                    for rule in doc['spec']['rules']:
+                        if 'host' in rule:
+                            old_host = rule['host']
+                            # Replace subdomain.dev.domain with subdomain-pr-X.domain
+                            # Example: retroboard.dev.homelab.int.zengarden.space -> retroboard-pr-123.homelab.int.zengarden.space
+                            new_host = old_host.replace(f'.{base_domain}', f'-{pr_id}.homelab.int.zengarden.space')
+                            rule['host'] = new_host
+                            print(f"  Updated host: {old_host} -> {new_host}")
+
+                # Remove TLS section (PartialIngress doesn't need it)
+                if 'tls' in doc.get('spec', {}):
+                    del doc['spec']['tls']
+                    print("  Removed TLS section")
+
+                # Remove cert-manager annotation
+                if 'annotations' in doc.get('metadata', {}):
+                    doc['metadata']['annotations'].pop('cert-manager.io/cluster-issuer', None)
+                    doc['metadata']['annotations'].pop('external-dns.alpha.kubernetes.io/hostname', None)
+                    print("  Removed cert-manager and external-dns annotations")
+
+                modified = True
+
+        if modified:
+            # Write back to file
+            with open(manifest_file, 'w') as f:
+                yaml.dump_all(documents, f, default_flow_style=False, sort_keys=False)
+            print(f"\nSuccessfully converted Ingress to PartialIngress")
+        else:
+            print("No Ingress resources found in manifest")
+
+        PYTHON_EOF
+
+        # Run the conversion
+        python3 /tmp/convert-to-partial-ingress.py "$pr_id" "$base_domain" "$manifest_file"
+
+        echo "pr-id=$pr_id" >> $GITHUB_OUTPUT
+
+        echo ""
+        echo "=== Modified manifest preview ==="
+        grep -B 2 -A 15 "kind: PartialIngress" "$manifest_file" || echo "No PartialIngress found"

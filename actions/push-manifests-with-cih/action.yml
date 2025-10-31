@@ -1,0 +1,127 @@
+name: Push Manifests with CompositeIngressHost
+description: Push Kubernetes manifests with optional CompositeIngressHost to the manifests repository
+
+inputs:
+  environment:
+    description: 'Environment (dev, ci-pr-<number>, prod)'
+    required: true
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  cluster:
+    description: 'Cluster name'
+    required: false
+    default: 'homelab'
+  manifest-file:
+    description: 'Path to main manifest file to push'
+    required: true
+  cih-file:
+    description: 'Path to CompositeIngressHost manifest file (optional)'
+    required: false
+    default: ''
+  manifests-repo:
+    description: 'Manifests repository (owner/repo)'
+    required: false
+    default: 'zengarden-space/manifests'
+  token:
+    description: 'Gitea token with write access to manifests repo'
+    required: true
+  commit-message:
+    description: 'Commit message'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Checkout manifests repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.manifests-repo }}
+        ref: 'main'
+        path: manifests-repo
+        token: ${{ inputs.token }}
+
+    - name: Push changes to manifests repo
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        cd manifests-repo
+        git config --local user.name "Gitea Actions Bot"
+        git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+        # Determine commit message
+        if [ -n "${{ inputs.commit-message }}" ]; then
+          commit_msg="${{ inputs.commit-message }}"
+        else
+          commit_msg="${{ github.repository }}: ${{ github.event.head_commit.message }} ${{ github.sha }}"
+        fi
+
+        # Retry loop for git operations
+        for attempt in {1..5}; do
+          echo "Attempt $attempt of 5"
+
+          # Pull latest changes
+          if ! git pull origin main; then
+            echo "Failed to pull on attempt $attempt"
+            continue
+          fi
+
+          # Create target directory and copy files
+          target_dir="./${{ inputs.cluster }}/${{ inputs.environment }}/$project_name"
+          mkdir -p "$target_dir"
+
+          # Copy main manifest
+          cp ../${{ inputs.manifest-file }} "$target_dir/manifest.yaml"
+          echo "Copied main manifest to $target_dir/manifest.yaml"
+
+          # Copy CompositeIngressHost if provided
+          if [ -n "${{ inputs.cih-file }}" ] && [ -f "../${{ inputs.cih-file }}" ]; then
+            cp ../${{ inputs.cih-file }} "$target_dir/compositeingresshost.yaml"
+            echo "Copied CompositeIngressHost to $target_dir/compositeingresshost.yaml"
+          fi
+
+          git add .
+
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            break
+          fi
+
+          # Commit changes
+          if ! git commit -m "$commit_msg"; then
+            echo "Failed to commit on attempt $attempt"
+            git reset --hard HEAD
+            continue
+          fi
+
+          # Try to push
+          if git push origin main; then
+            echo "Successfully pushed on attempt $attempt"
+            break
+          else
+            echo "Failed to push on attempt $attempt, discarding commit"
+            git reset --hard HEAD~1
+
+            if [ $attempt -eq 5 ]; then
+              echo "Failed to push after 5 attempts"
+              exit 1
+            fi
+
+            sleep $((attempt * 2))  # Exponential backoff
+          fi
+        done

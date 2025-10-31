@@ -1,0 +1,75 @@
+name: Add CompositeIngressHost
+description: Create CompositeIngressHost YAML file for PartialIngress operator
+
+inputs:
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  base-host:
+    description: 'Base hostname for dev environment (e.g., "retroboard.dev.homelab.int.zengarden.space")'
+    required: true
+  host-pattern:
+    description: 'Hostname pattern for PR environments (e.g., "retroboard-*.homelab.int.zengarden.space")'
+    required: true
+  ingress-class:
+    description: 'Ingress class name'
+    required: false
+    default: 'internal'
+  output-file:
+    description: 'Output file path for CompositeIngressHost manifest'
+    required: false
+    default: 'compositeingresshost.yaml'
+
+outputs:
+  manifest-file:
+    description: 'Path to generated CompositeIngressHost manifest'
+    value: ${{ steps.generate.outputs.manifest-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Generate CompositeIngressHost manifest
+      id: generate
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        output_file="${{ inputs.output-file }}"
+
+        echo "Creating CompositeIngressHost manifest"
+        echo "Project: $project_name"
+        echo "Base host: ${{ inputs.base-host }}"
+        echo "Host pattern: ${{ inputs.host-pattern }}"
+        echo "Ingress class: ${{ inputs.ingress-class }}"
+        echo "Output file: $output_file"
+
+        cat > "$output_file" <<EOF
+        ---
+        apiVersion: networking.zengarden.space/v1
+        kind: CompositeIngressHost
+        metadata:
+          name: ${project_name}-composite
+          namespace: dev-${project_name}
+        spec:
+          baseHost: "${{ inputs.base-host }}"
+          hostPattern: "${{ inputs.host-pattern }}"
+          ingressClassName: "${{ inputs.ingress-class }}"
+        EOF
+
+        echo "manifest-file=$output_file" >> $GITHUB_OUTPUT
+
+        echo ""
+        echo "=== Generated CompositeIngressHost ==="
+        cat "$output_file"
