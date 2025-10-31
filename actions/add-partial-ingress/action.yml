@@ -86,16 +86,8 @@ runs:
                 doc['apiVersion'] = 'networking.zengarden.space/v1'
                 doc['kind'] = 'PartialIngress'
 
-                # Update hostnames in rules
-                if 'rules' in doc.get('spec', {}):
-                    for rule in doc['spec']['rules']:
-                        if 'host' in rule:
-                            old_host = rule['host']
-                            # Replace subdomain.dev.domain with subdomain-<envid>.domain
-                            # Example: retroboard.dev.homelab.int.zengarden.space -> retroboard-abc12345.homelab.int.zengarden.space
-                            new_host = old_host.replace(f'.{base_domain}', f'-{env_id}.homelab.int.zengarden.space')
-                            rule['host'] = new_host
-                            print(f"  Updated host: {old_host} -> {new_host}")
+                # Hostnames are already correct from template, no replacement needed
+                print("  Keeping hostnames as-is (set by values template)")
 
                 # Remove TLS section (PartialIngress doesn't need it)
                 if 'tls' in doc.get('spec', {}):
