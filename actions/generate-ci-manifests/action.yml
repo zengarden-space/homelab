@@ -79,8 +79,8 @@ runs:
         echo "Processing values template: $template_file"
         echo "ENV_ID: $env_id"
 
-        # Substitute ${ENV_ID} in the template
-        envsubst < "$template_file" > "$values_file"
+        # Substitute ${ENV_ID} in the template using sed
+        sed "s/\${ENV_ID}/${env_id}/g" "$template_file" > "$values_file"
 
         echo "values-file=$values_file" >> $GITHUB_OUTPUT
         echo "Generated values file: $values_file"
