@@ -726,7 +726,19 @@ def watch_requests(service, shared_dir='/shared'):
                         context_data = json.loads(binding_context)
                         if context_data and len(context_data) > 0:
                             binding = context_data[0]
-                            obj = binding.get('object', {}) or (binding.get('objects', [{}])[0].get('object', {}))
+
+                            # Safely extract the object
+                            obj = None
+                            if 'object' in binding:
+                                obj = binding['object']
+                            elif 'objects' in binding and len(binding['objects']) > 0:
+                                obj = binding['objects'][0].get('object', {})
+
+                            if not obj:
+                                print(f"WARNING: No object found in binding context", file=sys.stderr)
+                                response = "OK"
+                                continue
+
                             kind = obj.get('kind', '')
 
                             if kind == 'PartialIngress':
