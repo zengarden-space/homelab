@@ -23,11 +23,12 @@ The core platform includes:
 4. **external-dns** - Automatic DNS synchronization
 5. **ingress-nginx** - HTTP(S) ingress controller
 6. **external-tunnel** - Cloudflare Tunnel + external ingress
-7. **victoria-metrics** - Monitoring stack
-8. **argocd** - GitOps controller
-9. **gitea** - Git server + automation
-10. **cnpg-system** - PostgreSQL operator
-11. **metabase** - Analytics platform
+7. **partial-ingress** - Partial environment deployment operator
+8. **victoria-metrics** - Monitoring stack
+9. **argocd** - GitOps controller
+10. **gitea** - Git server + automation
+11. **cnpg-system** - PostgreSQL operator
+12. **metabase** - Analytics platform
 
 ## Step 1: Configure External Integrations
 
@@ -193,11 +194,12 @@ helmfile -f secrets-system/helmfile.yaml.gotmpl apply
 4. external-dns (DNS synchronization)
 5. ingress-nginx-internal
 6. external-tunnel (Cloudflare + ingress-nginx-external)
-7. victoria-metrics
-8. argocd
-9. gitea
-10. cnpg-system
-11. metabase
+7. partial-ingress (PartialIngress operator for CI/PR environments)
+8. victoria-metrics
+9. argocd
+10. gitea
+11. cnpg-system
+12. metabase
 
 **Duration:** ~30-60 minutes (depends on image pulls and readiness checks)
 

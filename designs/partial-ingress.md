@@ -287,16 +287,17 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: retroboard-api-6c3f8a9b  # Hash of source Ingress
-  namespace: dev-retroboard-api  # Original namespace!
+  name: retroboard-api-6c3f8a9b  # Hash of hostname + ingressClass
+  namespace: dev-retroboard-api  # Original namespace where CIH resides!
   annotations:
-    partial-ingress.zengarden.space/replicated-for: "ci-feat-oauth-retroboard"
+    partial-ingress.zengarden.space/replicated-for: "retroboard-ci-feat-oauth.zengarden.space"
+    partial-ingress.zengarden.space/source-partial-ingress: "ci-feat-oauth-retroboard/retroboard"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"  # Copied from original
   ownerReferences:
     - apiVersion: networking.zengarden.space/v1
-      kind: PartialIngress
-      name: retroboard
-      namespace: ci-feat-oauth-retroboard
+      kind: CompositeIngressHost
+      name: retroboard-composite
+      # Owned by CIH in same namespace (cannot cross namespaces)
 
 spec:
   ingressClassName: internal
