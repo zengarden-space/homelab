@@ -340,7 +340,10 @@ class PartialIngressService:
                 raise
 
     def _replicate_ingress(self, base_ingress, new_hostname, ingress_class_name, paths, partial_ingress_obj, composite_host_obj):
-        """Replicate an Ingress to a different namespace with new hostname"""
+        """
+        Replicate an Ingress to CompositeIngressHost namespace with new hostname.
+        The replicated Ingress points to LOCAL services in the CIH namespace.
+        """
         # Compute hash for naming
         resource_hash = self.compute_hash(new_hostname, ingress_class_name)
 
@@ -353,21 +356,24 @@ class PartialIngressService:
         pi_namespace = pi_metadata.get('namespace')
         pi_name = pi_metadata.get('name')
 
-        # Get PartialIngress UID for owner reference
-        pi_uid = pi_metadata.get('uid')
+        # Get CompositeIngressHost metadata for owner reference
+        cih_metadata = composite_host_obj.get('metadata', {})
+        cih_namespace = cih_metadata.get('namespace')
+        cih_name = cih_metadata.get('name')
+        cih_uid = cih_metadata.get('uid')
 
-        # Build HTTP paths
+        # Build HTTP paths - use SAME backend (local service) as base Ingress
         http_paths = []
         for path_info in paths:
             http_paths.append(
                 client.V1HTTPIngressPath(
                     path=path_info['path'],
                     path_type=path_info['pathType'],
-                    backend=path_info['backend']
+                    backend=path_info['backend']  # Points to local service in CIH namespace
                 )
             )
 
-        # Build rules with new hostname
+        # Build rules with new hostname (from PartialIngress)
         rules = [
             client.V1IngressRule(
                 host=new_hostname,
@@ -379,7 +385,8 @@ class PartialIngressService:
 
         # Copy and modify annotations
         annotations = dict(base_ingress.metadata.annotations or {})
-        annotations['partial-ingress.zengarden.space/replicated-from'] = f"{base_namespace}/{base_name}"
+        annotations['partial-ingress.zengarden.space/replicated-for'] = new_hostname
+        annotations['partial-ingress.zengarden.space/source-partial-ingress'] = f"{pi_namespace}/{pi_name}"
 
         # Handle TLS
         tls = []
@@ -396,31 +403,30 @@ class PartialIngressService:
                     )
                 )
 
-        # Build owner reference - owned by PartialIngress for automatic cleanup
+        # Build owner reference - owned by CompositeIngressHost
         owner_references = [
             client.V1OwnerReference(
                 api_version='networking.zengarden.space/v1',
-                kind='PartialIngress',
-                name=pi_name,
-                uid=pi_uid,
+                kind='CompositeIngressHost',
+                name=cih_name,
+                uid=cih_uid,
                 controller=True,
                 block_owner_deletion=True
             )
         ]
-        print(f"  Setting PartialIngress {pi_namespace}/{pi_name} as owner", flush=True)
+        print(f"  Setting CompositeIngressHost {cih_namespace}/{cih_name} as owner", flush=True)
 
-        # Create replicated Ingress in the PartialIngress namespace!
+        # Create replicated Ingress in CIH namespace (base namespace)
         ingress = client.V1Ingress(
             api_version='networking.k8s.io/v1',
             kind='Ingress',
             metadata=client.V1ObjectMeta(
                 name=new_name,
-                namespace=pi_namespace,  # Deploy in PartialIngress namespace!
+                namespace=cih_namespace,  # Deploy in CompositeIngressHost namespace!
                 labels={
                     'app.kubernetes.io/managed-by': 'partial-ingress-operator',
                     'partial-ingress.zengarden.space/replicated': 'true',
-                    'partial-ingress.zengarden.space/base-namespace': base_namespace,
-                    'partial-ingress.zengarden.space/base-name': base_name
+                    'partial-ingress.zengarden.space/hostname': new_hostname
                 },
                 annotations=annotations,
                 owner_references=owner_references
@@ -433,23 +439,23 @@ class PartialIngressService:
         )
 
         try:
-            self.networking_v1.read_namespaced_ingress(name=new_name, namespace=pi_namespace)
+            self.networking_v1.read_namespaced_ingress(name=new_name, namespace=cih_namespace)
             # Update if exists
             result = self.networking_v1.replace_namespaced_ingress(
                 name=new_name,
-                namespace=pi_namespace,
+                namespace=cih_namespace,
                 body=ingress
             )
-            print(f"  Updated replicated Ingress: {pi_namespace}/{new_name}", flush=True)
+            print(f"  Updated replicated Ingress: {cih_namespace}/{new_name}", flush=True)
             return result
         except ApiException as e:
             if e.status == 404:
                 # Create if doesn't exist
                 result = self.networking_v1.create_namespaced_ingress(
-                    namespace=pi_namespace,
+                    namespace=cih_namespace,
                     body=ingress
                 )
-                print(f"  Created replicated Ingress: {pi_namespace}/{new_name}", flush=True)
+                print(f"  Created replicated Ingress: {cih_namespace}/{new_name}", flush=True)
                 return result
             else:
                 raise
@@ -466,11 +472,101 @@ class PartialIngressService:
 
     def _cleanup_orphaned_replicated_ingresses(self):
         """
-        Cleanup is now automatic via owner references.
-        Replicated Ingresses are owned by their PartialIngress and will be deleted automatically.
-        This method is kept for compatibility but does nothing.
+        Cleanup replicated Ingresses when the last PartialIngress for a hostname pattern is deleted.
+        Replicated Ingresses are owned by CompositeIngressHost, so we need manual cleanup.
         """
-        print(f"  Replicated Ingresses will be auto-deleted by Kubernetes (owned by PartialIngress)", flush=True)
+        print(f"  Checking for orphaned replicated Ingresses", flush=True)
+
+        try:
+            # Get all CompositeIngressHosts
+            all_composite_hosts = self.get_all_composite_ingress_hosts()
+
+            # Get all active PartialIngresses
+            all_partial_ingresses = self.custom_api.list_cluster_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                plural='partialingresses'
+            ).get('items', [])
+
+            # For each CompositeIngressHost, check if there are matching PartialIngresses
+            for cih in all_composite_hosts:
+                cih_metadata = cih.get('metadata', {})
+                cih_spec = cih.get('spec', {})
+                cih_namespace = cih_metadata.get('namespace')
+                cih_name = cih_metadata.get('name')
+
+                host_pattern = cih_spec.get('hostPattern')
+                ingress_class = cih_spec.get('ingressClassName')
+
+                # Find matching PartialIngresses (excluding ones being deleted)
+                matching_pis = []
+                for pi in all_partial_ingresses:
+                    # Skip if being deleted
+                    if pi.get('metadata', {}).get('deletionTimestamp'):
+                        continue
+
+                    pi_spec = pi.get('spec', {})
+                    pi_class = pi_spec.get('ingressClassName')
+
+                    if pi_class != ingress_class:
+                        continue
+
+                    # Check if hostname matches pattern
+                    pi_rules = pi_spec.get('rules', [])
+                    for rule in pi_rules:
+                        hostname = rule.get('host', '')
+                        if hostname and fnmatch.fnmatch(hostname, host_pattern):
+                            matching_pis.append(pi)
+                            break
+
+                # If no matching PartialIngresses, delete all replicated Ingresses for this CIH
+                if len(matching_pis) == 0:
+                    print(f"  No active PartialIngresses for CIH {cih_namespace}/{cih_name}, cleaning up replicated Ingresses", flush=True)
+                    self._delete_replicated_ingresses_for_cih(cih_namespace, cih_name)
+                else:
+                    print(f"  CIH {cih_namespace}/{cih_name} still has {len(matching_pis)} matching PartialIngress(es)", flush=True)
+
+        except Exception as e:
+            print(f"ERROR: Failed to cleanup orphaned replicated Ingresses: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+
+    def _delete_replicated_ingresses_for_cih(self, cih_namespace, cih_name):
+        """Delete all replicated Ingresses in a CompositeIngressHost namespace"""
+        try:
+            # Find all replicated Ingresses in the CIH namespace
+            all_ingresses = self.networking_v1.list_namespaced_ingress(
+                namespace=cih_namespace,
+                label_selector='partial-ingress.zengarden.space/replicated=true'
+            )
+
+            deleted_count = 0
+            for ing in all_ingresses.items:
+                # Verify it's owned by this CIH
+                owner_refs = ing.metadata.owner_references or []
+                is_owned_by_cih = False
+                for owner in owner_refs:
+                    if owner.kind == 'CompositeIngressHost' and owner.name == cih_name:
+                        is_owned_by_cih = True
+                        break
+
+                if is_owned_by_cih:
+                    print(f"    Deleting replicated Ingress: {cih_namespace}/{ing.metadata.name}", flush=True)
+                    try:
+                        self.networking_v1.delete_namespaced_ingress(
+                            name=ing.metadata.name,
+                            namespace=cih_namespace
+                        )
+                        deleted_count += 1
+                    except ApiException as e:
+                        if e.status != 404:
+                            print(f"WARNING: Failed to delete Ingress {ing.metadata.name}: {e}", file=sys.stderr)
+
+            if deleted_count > 0:
+                print(f"  Deleted {deleted_count} replicated Ingress(es) for CIH {cih_namespace}/{cih_name}", flush=True)
+
+        except Exception as e:
+            print(f"ERROR: Failed to delete replicated Ingresses: {e}", file=sys.stderr)
 
     def _update_partial_ingress_status(self, namespace, name, replicated_ingresses):
         """Update PartialIngress status"""
