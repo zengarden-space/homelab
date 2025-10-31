@@ -1,0 +1,116 @@
+name: Generate CI Manifests
+description: Generate Kubernetes manifests for CI environment from values template
+
+inputs:
+  slug:
+    description: 'Environment slug (e.g., branch name) - will be hashed to create ENV_ID'
+    required: true
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  image-tag:
+    description: 'Docker image tag'
+    required: true
+  cluster:
+    description: 'Cluster name'
+    required: false
+    default: 'homelab'
+  values-template:
+    description: 'Path to values template file'
+    required: false
+    default: './helm/values-ci.yaml.tpl'
+
+outputs:
+  manifest-file:
+    description: 'Path to generated manifest file'
+    value: ${{ steps.generate.outputs.manifest-file }}
+  environment-id:
+    description: 'Environment identifier (sha256 hash of slug)'
+    value: ${{ steps.env.outputs.id }}
+  project-name:
+    description: 'Resolved project name'
+    value: ${{ steps.project.outputs.name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Calculate environment ID
+      id: env
+      shell: bash
+      run: |
+        slug="${{ inputs.slug }}"
+        env_id=$(echo -n "$slug" | sha256sum | cut -c1-8)
+        echo "id=$env_id" >> $GITHUB_OUTPUT
+        echo "Slug: $slug"
+        echo "Environment ID: $env_id"
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.12.0'
+
+    - name: Process values template
+      id: process
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        env_id="${{ steps.env.outputs.id }}"
+        template_file="${{ inputs.values-template }}"
+        values_file="values-ci-${env_id}.yaml"
+
+        if [ ! -f "$template_file" ]; then
+          echo "::error::Values template file not found: $template_file"
+          exit 1
+        fi
+
+        echo "Processing values template: $template_file"
+        echo "ENV_ID: $env_id"
+
+        # Substitute ${ENV_ID} in the template
+        envsubst < "$template_file" > "$values_file"
+
+        echo "values-file=$values_file" >> $GITHUB_OUTPUT
+        echo "Generated values file: $values_file"
+        echo ""
+        echo "=== Values file content ==="
+        cat "$values_file"
+
+    - name: Generate manifest
+      id: generate
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        env_id="${{ steps.env.outputs.id }}"
+        chart_path="./helm/$project_name"
+        values_file="${{ steps.process.outputs.values-file }}"
+        manifest_file="manifest-ci-${env_id}.yaml"
+
+        echo "Generating CI manifest"
+        echo "Cluster: ${{ inputs.cluster }}"
+        echo "Project: $project_name"
+        echo "Environment ID: $env_id"
+        echo "Chart path: $chart_path"
+        echo "Values file: $values_file"
+        echo "Image tag: ${{ inputs.image-tag }}"
+
+        helm template "$project_name" "$chart_path" \
+          --namespace ci-${env_id}-$project_name \
+          --values "$values_file" \
+          --set image.tag=${{ inputs.image.tag }} \
+          > "$manifest_file"
+
+        echo "manifest-file=$manifest_file" >> $GITHUB_OUTPUT
+        echo "Generated manifest: $manifest_file"
