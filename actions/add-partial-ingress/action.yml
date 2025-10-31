@@ -58,6 +58,12 @@ runs:
         echo "Project: $project_name"
         echo "Base domain: $base_domain"
 
+        # Install PyYAML if not available
+        if ! python3 -c "import yaml" 2>/dev/null; then
+          echo "Installing PyYAML..."
+          pip3 install --quiet PyYAML
+        fi
+
         # Create a Python script to do the conversion
         cat > /tmp/convert-to-partial-ingress.py <<'PYTHON_EOF'
         import yaml
