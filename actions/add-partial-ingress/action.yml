@@ -1,9 +1,9 @@
 name: Add PartialIngress
-description: Convert rendered Ingress manifests to PartialIngress for PR environments
+description: Convert rendered Ingress manifests to PartialIngress for PR/branch environments
 
 inputs:
-  pr-number:
-    description: 'Pull request number'
+  slug:
+    description: 'Environment slug (e.g., branch name, PR number) - will be hashed to create unique ID'
     required: true
   project-name:
     description: 'Project name'
@@ -21,9 +21,9 @@ outputs:
   manifest-file:
     description: 'Path to modified manifest file with PartialIngress'
     value: ${{ inputs.manifest-file }}
-  pr-id:
-    description: 'PR identifier used in hostnames'
-    value: ${{ steps.convert.outputs.pr-id }}
+  environment-id:
+    description: 'Environment identifier used in hostnames and namespaces (sha256 hash of slug)'
+    value: ${{ steps.convert.outputs.environment-id }}
 
 runs:
   using: composite
@@ -46,11 +46,15 @@ runs:
       run: |
         project_name="${{ steps.project.outputs.name }}"
         manifest_file="${{ inputs.manifest-file }}"
-        pr_id="pr-${{ inputs.pr-number }}"
+        slug="${{ inputs.slug }}"
         base_domain="${{ inputs.base-domain }}"
 
+        # Generate environment ID from slug using sha256 hash (first 8 characters)
+        env_id=$(echo -n "$slug" | sha256sum | cut -c1-8)
+
         echo "Converting Ingress to PartialIngress in: $manifest_file"
-        echo "PR ID: $pr_id"
+        echo "Slug: $slug"
+        echo "Environment ID: $env_id"
         echo "Project: $project_name"
         echo "Base domain: $base_domain"
 
@@ -59,7 +63,7 @@ runs:
         import yaml
         import sys
 
-        pr_id = sys.argv[1]
+        env_id = sys.argv[1]
         base_domain = sys.argv[2]
         manifest_file = sys.argv[3]
 
@@ -82,9 +86,9 @@ runs:
                     for rule in doc['spec']['rules']:
                         if 'host' in rule:
                             old_host = rule['host']
-                            # Replace subdomain.dev.domain with subdomain-pr-X.domain
-                            # Example: retroboard.dev.homelab.int.zengarden.space -> retroboard-pr-123.homelab.int.zengarden.space
-                            new_host = old_host.replace(f'.{base_domain}', f'-{pr_id}.homelab.int.zengarden.space')
+                            # Replace subdomain.dev.domain with subdomain-<envid>.domain
+                            # Example: retroboard.dev.homelab.int.zengarden.space -> retroboard-abc12345.homelab.int.zengarden.space
+                            new_host = old_host.replace(f'.{base_domain}', f'-{env_id}.homelab.int.zengarden.space')
                             rule['host'] = new_host
                             print(f"  Updated host: {old_host} -> {new_host}")
 
@@ -112,9 +116,9 @@ runs:
         PYTHON_EOF
 
         # Run the conversion
-        python3 /tmp/convert-to-partial-ingress.py "$pr_id" "$base_domain" "$manifest_file"
+        python3 /tmp/convert-to-partial-ingress.py "$env_id" "$base_domain" "$manifest_file"
 
-        echo "pr-id=$pr_id" >> $GITHUB_OUTPUT
+        echo "environment-id=$env_id" >> $GITHUB_OUTPUT
 
         echo ""
         echo "=== Modified manifest preview ==="

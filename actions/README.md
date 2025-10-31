@@ -29,7 +29,7 @@ Creates a CompositeIngressHost YAML file for the PartialIngress operator. This d
 
 ### 3. add-partial-ingress
 
-Converts rendered Ingress resources to PartialIngress for PR environments. Modifies hostnames and removes TLS configuration.
+Converts rendered Ingress resources to PartialIngress for PR/branch environments. Generates a unique environment ID from the slug (branch name) using SHA256 hash.
 
 **Usage:**
 
@@ -37,18 +37,19 @@ Converts rendered Ingress resources to PartialIngress for PR environments. Modif
 - name: Convert to PartialIngress
   uses: zengarden-space/homelab/actions/add-partial-ingress@main
   with:
-    pr-number: ${{ github.event.pull_request.number }}  # Required: PR number
+    slug: ${{ github.head_ref }}  # Required: branch name or slug
     manifest-file: manifest-dev.yaml  # Required: manifest to modify
     base-domain: dev.homelab.int.zengarden.space  # Optional: domain to replace
 ```
 
 **Outputs:**
 - `manifest-file`: Path to modified manifest with PartialIngress
-- `pr-id`: PR identifier used in hostnames (e.g., "pr-123")
+- `environment-id`: Environment identifier (sha256 hash of slug, 8 chars)
 
 **Transformations:**
 - `Ingress` → `PartialIngress` (apiVersion: networking.zengarden.space/v1)
-- `myapp.dev.domain` → `myapp-pr-123.domain`
+- Generates unique ID: `sha256(branch_name)[:8]`
+- `myapp.dev.domain` → `myapp-abc12345.domain` (where `abc12345` is hash of branch name)
 - Removes TLS sections
 - Removes cert-manager and external-dns annotations
 
@@ -255,14 +256,14 @@ jobs:
         id: partial-ingress
         uses: zengarden-space/homelab/actions/add-partial-ingress@main
         with:
-          pr-number: ${{ github.event.pull_request.number }}
+          slug: ${{ github.head_ref }}
           manifest-file: ${{ steps.gen-ci.outputs.manifest-file }}
 
       - name: Deploy to CI environment
         if: github.event_name == 'pull_request'
         uses: zengarden-space/homelab/actions/push-manifests-with-cih@main
         with:
-          environment: ci-${{ steps.partial-ingress.outputs.pr-id }}
+          environment: ci-${{ steps.partial-ingress.outputs.environment-id }}
           manifest-file: ${{ steps.partial-ingress.outputs.manifest-file }}
           token: ${{ secrets.CONTENT_WRITE_TOKEN }}
 
@@ -287,7 +288,7 @@ manifests/
     │   └── {project-name}/
     │       ├── manifest.yaml              # Application resources
     │       └── compositeingresshost.yaml  # Optional: for PartialIngress
-    ├── ci-pr-{number}/          # PR environments
+    ├── ci-{env-id}/             # PR/branch environments (env-id = sha256(branch_name)[:8])
     │   └── {project-name}/
     │       └── manifest.yaml              # PartialIngress resources
     └── prod/
@@ -298,7 +299,7 @@ manifests/
 **Examples:**
 - Dev: `homelab/dev/retroboard/manifest.yaml`
 - Dev CIH: `homelab/dev/retroboard/compositeingresshost.yaml`
-- PR: `homelab/ci-pr-123/retroboard/manifest.yaml`
+- PR/Branch: `homelab/ci-abc12345/retroboard/manifest.yaml` (where `abc12345` = sha256(branch_name)[:8])
 - Prod: `homelab/prod/retroboard/manifest.yaml`
 
 ## Required Secrets
