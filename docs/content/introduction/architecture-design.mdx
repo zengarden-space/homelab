@@ -217,12 +217,18 @@ Platform services provide core capabilities required by all applications.
    - Creates Kubernetes Secrets based on `DerivedSecret` CRDs
    - Enables single master password to generate all component credentials
 
-2. **Metabase CNPG Operator**
+2. **PartialIngress Operator**
+   - Enables partial environment deployments for PR/CI environments
+   - Automatically replicates missing services from base environments
+   - Reduces resource usage by deploying only changed components
+   - Uses finalizers for proper cleanup across namespaces
+
+3. **Metabase CNPG Operator**
    - Watches CloudNativePG `Database` resources
    - Automatically registers databases in Metabase
    - Syncs metadata and enables caching
 
-3. **Gitea Automation**
+4. **Gitea Automation**
    - OAuth setup (Playwright-based browser automation)
    - Repository synchronization (GitHub ↔ Gitea)
    - Push mirror configuration

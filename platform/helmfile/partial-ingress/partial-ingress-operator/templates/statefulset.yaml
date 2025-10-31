@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "partial-ingress-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "partial-ingress-operator.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "partial-ingress-operator.fullname" . }}
+  replicas: {{ .Values.operator.replicaCount }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  selector:
+    matchLabels:
+      {{- include "partial-ingress-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "partial-ingress-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/hooks: {{ include (print $.Template.BasePath "/hooks-configmap.yaml") . | sha256sum }}
+        checksum/handler: {{ include (print $.Template.BasePath "/handler-service-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+
+      containers:
+        # Main shell-operator container
+        - name: operator
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.operator.securityContext | nindent 12 }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.operator.logLevel | quote }}
+            - name: LOG_TYPE
+              value: "json"
+          volumeMounts:
+            - name: hooks
+              mountPath: /hooks
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: shell-operator-run
+              mountPath: /var/run/shell-operator
+            - name: shared
+              mountPath: /shared
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: 9115
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9115
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+        # Handler service sidecar (Python with Kubernetes client)
+        - name: handler-service
+          image: "{{ .Values.handlerSidecar.image.repository }}:{{ .Values.handlerSidecar.image.tag }}"
+          imagePullPolicy: {{ .Values.handlerSidecar.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.operator.securityContext | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 5
+          env:
+            - name: HOME
+              value: /home/python
+            - name: PYTHONUSERBASE
+              value: /home/python/.local
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Setting up Python environment..."
+              export PATH="/home/python/.local/bin:$PATH"
+
+              echo "Installing dependencies from requirements.txt..."
+              pip install --no-cache-dir --user -r /scripts/requirements.txt
+
+              echo "Starting partial-ingress operator service..."
+              python3 /scripts/partial-ingress-service.py
+          volumeMounts:
+            - name: handler-scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/python
+            - name: shared
+              mountPath: /shared
+          resources:
+            {{- toYaml .Values.handlerSidecar.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pgrep -f "python3 /scripts/partial-ingress-service.py" > /dev/null
+            initialDelaySeconds: 70
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pgrep -f "python3 /scripts/partial-ingress-service.py" > /dev/null && test -d /shared
+            initialDelaySeconds: 65
+            periodSeconds: 5
+            timeoutSeconds: 3
+
+      volumes:
+        - name: hooks
+          configMap:
+            name: {{ include "partial-ingress-operator.fullname" . }}-hooks
+            defaultMode: 0755
+        - name: handler-scripts
+          configMap:
+            name: {{ include "partial-ingress-operator.fullname" . }}-handler
+            defaultMode: 0755
+        - name: tmp
+          emptyDir: {}
+        - name: shell-operator-run
+          emptyDir: {}
+        - name: shared
+          emptyDir: {}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: home
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- if .Values.handlerSidecar.home.storageClassName }}
+        storageClassName: {{ .Values.handlerSidecar.home.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: 200Mi
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

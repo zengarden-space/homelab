@@ -598,6 +598,71 @@ const isPathAllowed = (method, path) => {
    - Sets up push mirrors (Gitea → GitHub, 8h interval)
    - Creates ArgoCD webhook
 
+### PartialIngress Operator (Shell-Operator + Python)
+
+**Purpose**: Enable partial environment deployments for PR/CI environments
+
+**Why Custom:**
+- Reduces resource usage in PR environments by 50-80%
+- Automatically replicates missing services from base environments
+- Allows deploying only changed components
+- Provides seamless routing between PR and base services
+
+**How It Works:**
+```
+1. Deploy only frontend in PR environment (ci-pr-123-myapp)
+2. PartialIngress detects missing backend service
+3. Operator replicates backend Ingress from dev environment
+4. Nginx merges rules: PR frontend + dev backend
+5. Result: Full-stack environment with partial deployment
+```
+
+**CRDs:**
+- **PartialIngress**: Drop-in replacement for standard Ingress with auto-replication
+- **CompositeIngressHost**: Declares base environment and hostname pattern
+
+**Implementation:**
+- Shell-operator for event watching
+- Python sidecar for complex Kubernetes API operations
+- File-based IPC between containers
+- Finalizers for cross-namespace cleanup
+
+**Example:**
+```yaml
+# Base environment (dev-myapp)
+apiVersion: networking.zengarden.space/v1
+kind: CompositeIngressHost
+metadata:
+  name: myapp-composite
+  namespace: dev-myapp
+spec:
+  baseHost: "myapp.dev.domain.com"
+  hostPattern: "myapp-*.domain.com"
+  ingressClassName: internal
+---
+# PR environment (ci-pr-123-myapp) - only frontend deployed
+apiVersion: networking.zengarden.space/v1
+kind: PartialIngress
+metadata:
+  name: frontend
+  namespace: ci-pr-123-myapp
+spec:
+  ingressClassName: internal
+  rules:
+  - host: myapp-pr-123.domain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+# Operator automatically creates backend Ingress in dev-myapp
+# with myapp-pr-123.domain.com hostname
+```
+
 ### Metabase CNPG Operator (Shell-Operator)
 
 **Purpose**: Auto-register CNPG databases in Metabase

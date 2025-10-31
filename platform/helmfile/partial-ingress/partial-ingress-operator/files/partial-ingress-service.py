@@ -1,0 +1,786 @@
+#!/usr/bin/env python3
+"""
+PartialIngress Operator Service
+Handles PartialIngress and CompositeIngressHost CRDs to enable partial environment deployments
+"""
+
+import os
+import sys
+import json
+import time
+import signal
+import hashlib
+import fnmatch
+from datetime import datetime
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    global shutdown_requested
+    print(f"\n[shutdown] Received signal {signum}, initiating graceful shutdown...", flush=True)
+    shutdown_requested = True
+
+
+class PartialIngressService:
+    """Main service for processing PartialIngress and CompositeIngressHost events"""
+
+    def __init__(self):
+        # Load Kubernetes config from service account
+        config.load_incluster_config()
+        self.v1 = client.CoreV1Api()
+        self.networking_v1 = client.NetworkingV1Api()
+        self.custom_api = client.CustomObjectsApi()
+
+        print('PartialIngress Operator service initialized', flush=True)
+
+    def compute_hash(self, hostname, ingress_class_name):
+        """Compute hash for naming replicated resources"""
+        hash_input = f"{hostname}:{ingress_class_name}"
+        return hashlib.sha256(hash_input.encode()).hexdigest()[:8]
+
+    def get_all_composite_ingress_hosts(self):
+        """Get all CompositeIngressHost resources across all namespaces"""
+        try:
+            result = self.custom_api.list_cluster_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                plural='compositeingresshosts'
+            )
+            return result.get('items', [])
+        except ApiException as e:
+            if e.status == 404:
+                return []
+            print(f"ERROR: Failed to list CompositeIngressHosts: {e}", file=sys.stderr)
+            raise
+
+    def deduplicate_composite_hosts(self, composite_hosts):
+        """Deduplicate CompositeIngressHost resources by spec"""
+        seen = {}
+        for host in composite_hosts:
+            spec = host.get('spec', {})
+            key = (spec.get('baseHost'), spec.get('hostPattern'), spec.get('ingressClassName'))
+            if key not in seen:
+                seen[key] = host
+        return list(seen.values())
+
+    def find_base_ingresses(self, base_host, ingress_class_name):
+        """Find all Ingress resources matching baseHost and ingressClassName"""
+        try:
+            all_ingresses = self.networking_v1.list_ingress_for_all_namespaces()
+            matching = []
+
+            for ing in all_ingresses.items:
+                # Check ingressClassName
+                if ing.spec.ingress_class_name != ingress_class_name:
+                    continue
+
+                # Check if any rule matches baseHost
+                if ing.spec.rules:
+                    for rule in ing.spec.rules:
+                        if rule.host == base_host:
+                            matching.append(ing)
+                            break
+
+            return matching
+        except ApiException as e:
+            print(f"ERROR: Failed to list Ingresses: {e}", file=sys.stderr)
+            raise
+
+    def find_matching_partial_ingresses(self, host_pattern):
+        """Find all PartialIngress resources matching the hostPattern"""
+        try:
+            result = self.custom_api.list_cluster_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                plural='partialingresses'
+            )
+
+            matching = []
+            for ping in result.get('items', []):
+                spec = ping.get('spec', {})
+                rules = spec.get('rules', [])
+
+                for rule in rules:
+                    host = rule.get('host', '')
+                    if fnmatch.fnmatch(host, host_pattern):
+                        matching.append(ping)
+                        break
+
+            return matching
+        except ApiException as e:
+            if e.status == 404:
+                return []
+            print(f"ERROR: Failed to list PartialIngresses: {e}", file=sys.stderr)
+            raise
+
+    def extract_paths_from_ingress(self, ingress):
+        """Extract paths and backends from an Ingress"""
+        paths = []
+        if ingress.spec.rules:
+            for rule in ingress.spec.rules:
+                if rule.http and rule.http.paths:
+                    for path_obj in rule.http.paths:
+                        paths.append({
+                            'path': path_obj.path,
+                            'pathType': path_obj.path_type,
+                            'backend': path_obj.backend
+                        })
+        return paths
+
+    def extract_paths_from_partial_ingress(self, partial_ingress):
+        """Extract paths from a PartialIngress spec"""
+        paths = []
+        spec = partial_ingress.get('spec', {})
+        rules = spec.get('rules', [])
+
+        for rule in rules:
+            http = rule.get('http', {})
+            paths_list = http.get('paths', [])
+
+            for path_obj in paths_list:
+                paths.append(path_obj.get('path', '/'))
+
+        return paths
+
+    def is_path_overridden(self, path, overridden_paths):
+        """Check if a path is overridden by PartialIngress"""
+        # Simple string comparison for now
+        # TODO: Handle more complex path matching (Prefix vs Exact)
+        return path in overridden_paths
+
+    def process_partial_ingress(self, binding_context):
+        """Process a PartialIngress event from binding context"""
+        try:
+            context_data = json.loads(binding_context)
+
+            if not context_data or len(context_data) == 0:
+                raise Exception("Empty binding context")
+
+            binding = context_data[0]
+
+            # Handle both single object and multiple objects
+            objects = []
+            if 'object' in binding:
+                objects = [{'object': binding['object']}]
+            elif 'objects' in binding:
+                objects = binding['objects']
+
+            if not objects:
+                print("WARNING: No objects in binding context", file=sys.stderr)
+                return
+
+            # Process each PartialIngress
+            for obj_wrapper in objects:
+                obj = obj_wrapper.get('object', {})
+                self._process_single_partial_ingress(obj)
+
+        except Exception as e:
+            print(f"ERROR in process_partial_ingress: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def _process_single_partial_ingress(self, obj):
+        """Process a single PartialIngress object"""
+        metadata = obj.get('metadata', {})
+        spec = obj.get('spec', {})
+
+        namespace = metadata.get('namespace')
+        name = metadata.get('name')
+        uid = metadata.get('uid')
+        deletion_timestamp = metadata.get('deletionTimestamp')
+
+        print(f"Processing PartialIngress: {namespace}/{name}", flush=True)
+
+        # Handle deletion (when deletionTimestamp is set)
+        if deletion_timestamp:
+            print(f"  PartialIngress is being deleted, cleaning up replicated Ingresses", flush=True)
+            self._cleanup_replicated_ingresses(namespace, name, uid)
+            self._remove_finalizer(namespace, name)
+            print(f"✓ Cleaned up PartialIngress: {namespace}/{name}", flush=True)
+            return
+
+        # Ensure finalizer is present
+        self._ensure_finalizer(namespace, name, metadata)
+
+        # Extract hostname from PartialIngress
+        rules = spec.get('rules', [])
+        if not rules:
+            print("WARNING: No rules in PartialIngress, skipping", flush=True)
+            return
+
+        hostname = rules[0].get('host', '')
+        if not hostname:
+            print("WARNING: No host in PartialIngress rules, skipping", flush=True)
+            return
+
+        ingress_class_name = spec.get('ingressClassName', '')
+
+        print(f"  Hostname: {hostname}", flush=True)
+        print(f"  IngressClass: {ingress_class_name}", flush=True)
+
+        # 1. Generate Ingress from PartialIngress in the same namespace
+        self._generate_ingress_from_partial(obj)
+
+        # 2. Find matching CompositeIngressHosts
+        all_composite_hosts = self.get_all_composite_ingress_hosts()
+        composite_hosts = self.deduplicate_composite_hosts(all_composite_hosts)
+
+        replicated_ingresses = []
+
+        for composite_host in composite_hosts:
+            cih_spec = composite_host.get('spec', {})
+            base_host = cih_spec.get('baseHost')
+            host_pattern = cih_spec.get('hostPattern')
+            cih_ingress_class = cih_spec.get('ingressClassName')
+
+            # Check if this PartialIngress matches the pattern
+            if not fnmatch.fnmatch(hostname, host_pattern):
+                continue
+
+            if cih_ingress_class != ingress_class_name:
+                continue
+
+            print(f"  Matched CompositeIngressHost: baseHost={base_host}, pattern={host_pattern}", flush=True)
+
+            # Find base Ingresses
+            base_ingresses = self.find_base_ingresses(base_host, cih_ingress_class)
+            print(f"  Found {len(base_ingresses)} base Ingresses", flush=True)
+
+            # Extract paths provided by this PartialIngress
+            overridden_paths = self.extract_paths_from_partial_ingress(obj)
+            print(f"  Overridden paths: {overridden_paths}", flush=True)
+
+            # Replicate non-overridden Ingresses
+            for base_ing in base_ingresses:
+                base_paths = self.extract_paths_from_ingress(base_ing)
+
+                # Check if any paths are NOT overridden
+                non_overridden_paths = [
+                    p for p in base_paths
+                    if not self.is_path_overridden(p['path'], overridden_paths)
+                ]
+
+                if non_overridden_paths:
+                    replicated_ing = self._replicate_ingress(
+                        base_ing,
+                        hostname,
+                        ingress_class_name,
+                        non_overridden_paths,
+                        obj
+                    )
+                    if replicated_ing:
+                        replicated_ingresses.append({
+                            'name': replicated_ing.metadata.name,
+                            'namespace': replicated_ing.metadata.namespace,
+                            'sourceIngress': f"{base_ing.metadata.namespace}/{base_ing.metadata.name}"
+                        })
+
+        # Update PartialIngress status
+        self._update_partial_ingress_status(namespace, name, replicated_ingresses)
+
+        print(f"✓ Successfully processed PartialIngress: {namespace}/{name}", flush=True)
+
+    def _generate_ingress_from_partial(self, partial_ingress_obj):
+        """Generate standard Ingress from PartialIngress in the same namespace"""
+        metadata = partial_ingress_obj.get('metadata', {})
+        spec = partial_ingress_obj.get('spec', {})
+
+        namespace = metadata.get('namespace')
+        name = metadata.get('name')
+        uid = metadata.get('uid')
+
+        # Create Ingress with same spec as PartialIngress
+        ingress = client.V1Ingress(
+            api_version='networking.k8s.io/v1',
+            kind='Ingress',
+            metadata=client.V1ObjectMeta(
+                name=name,
+                namespace=namespace,
+                labels={
+                    'app.kubernetes.io/managed-by': 'partial-ingress-operator',
+                    'partial-ingress.zengarden.space/source': name
+                },
+                annotations=spec.get('annotations', {}),
+                owner_references=[
+                    client.V1OwnerReference(
+                        api_version='networking.zengarden.space/v1',
+                        kind='PartialIngress',
+                        name=name,
+                        uid=uid,
+                        controller=True,
+                        block_owner_deletion=True
+                    )
+                ]
+            ),
+            spec=self._dict_to_ingress_spec(spec)
+        )
+
+        try:
+            self.networking_v1.read_namespaced_ingress(name=name, namespace=namespace)
+            # Update if exists
+            self.networking_v1.replace_namespaced_ingress(
+                name=name,
+                namespace=namespace,
+                body=ingress
+            )
+            print(f"  Updated Ingress: {namespace}/{name}", flush=True)
+        except ApiException as e:
+            if e.status == 404:
+                # Create if doesn't exist
+                self.networking_v1.create_namespaced_ingress(
+                    namespace=namespace,
+                    body=ingress
+                )
+                print(f"  Created Ingress: {namespace}/{name}", flush=True)
+            else:
+                raise
+
+    def _replicate_ingress(self, base_ingress, new_hostname, ingress_class_name, paths, partial_ingress_obj):
+        """Replicate an Ingress to a different namespace with new hostname"""
+        # Compute hash for naming
+        resource_hash = self.compute_hash(new_hostname, ingress_class_name)
+
+        base_namespace = base_ingress.metadata.namespace
+        base_name = base_ingress.metadata.name
+
+        new_name = f"{base_name}-{resource_hash}"
+
+        pi_metadata = partial_ingress_obj.get('metadata', {})
+        pi_namespace = pi_metadata.get('namespace')
+        pi_name = pi_metadata.get('name')
+        pi_uid = pi_metadata.get('uid')
+
+        # Build HTTP paths
+        http_paths = []
+        for path_info in paths:
+            http_paths.append(
+                client.V1HTTPIngressPath(
+                    path=path_info['path'],
+                    path_type=path_info['pathType'],
+                    backend=path_info['backend']
+                )
+            )
+
+        # Build rules with new hostname
+        rules = [
+            client.V1IngressRule(
+                host=new_hostname,
+                http=client.V1HTTPIngressRuleValue(
+                    paths=http_paths
+                )
+            )
+        ]
+
+        # Copy and modify annotations
+        annotations = dict(base_ingress.metadata.annotations or {})
+        annotations['partial-ingress.zengarden.space/replicated-for'] = pi_namespace
+
+        # Handle TLS
+        tls = []
+        if base_ingress.spec.tls:
+            for tls_config in base_ingress.spec.tls:
+                # Append hash to secret name
+                original_secret_name = tls_config.secret_name
+                new_secret_name = f"{original_secret_name}-{resource_hash}" if original_secret_name else None
+
+                tls.append(
+                    client.V1IngressTLS(
+                        hosts=[new_hostname],
+                        secret_name=new_secret_name
+                    )
+                )
+
+        # Add annotations for tracking (can't use cross-namespace owner references)
+        annotations['partial-ingress.zengarden.space/source-partial-ingress'] = f"{pi_namespace}/{pi_name}"
+        annotations['partial-ingress.zengarden.space/source-partial-ingress-uid'] = pi_uid
+
+        # Create replicated Ingress
+        ingress = client.V1Ingress(
+            api_version='networking.k8s.io/v1',
+            kind='Ingress',
+            metadata=client.V1ObjectMeta(
+                name=new_name,
+                namespace=base_namespace,  # Deploy in original namespace!
+                labels={
+                    'app.kubernetes.io/managed-by': 'partial-ingress-operator',
+                    'partial-ingress.zengarden.space/replicated': 'true',
+                    'partial-ingress.zengarden.space/pi-namespace': pi_namespace,
+                    'partial-ingress.zengarden.space/pi-name': pi_name
+                },
+                annotations=annotations
+            ),
+            spec=client.V1IngressSpec(
+                ingress_class_name=ingress_class_name,
+                rules=rules,
+                tls=tls if tls else None
+            )
+        )
+
+        try:
+            self.networking_v1.read_namespaced_ingress(name=new_name, namespace=base_namespace)
+            # Update if exists
+            result = self.networking_v1.replace_namespaced_ingress(
+                name=new_name,
+                namespace=base_namespace,
+                body=ingress
+            )
+            print(f"  Updated replicated Ingress: {base_namespace}/{new_name}", flush=True)
+            return result
+        except ApiException as e:
+            if e.status == 404:
+                # Create if doesn't exist
+                result = self.networking_v1.create_namespaced_ingress(
+                    namespace=base_namespace,
+                    body=ingress
+                )
+                print(f"  Created replicated Ingress: {base_namespace}/{new_name}", flush=True)
+                return result
+            else:
+                raise
+
+    def _dict_to_ingress_spec(self, spec_dict):
+        """Convert dictionary to V1IngressSpec"""
+        # This is a simplified conversion - you may need to handle more cases
+        return client.V1IngressSpec(
+            ingress_class_name=spec_dict.get('ingressClassName'),
+            default_backend=spec_dict.get('defaultBackend'),
+            rules=spec_dict.get('rules'),
+            tls=spec_dict.get('tls')
+        )
+
+    def _ensure_finalizer(self, namespace, name, metadata):
+        """Ensure finalizer is present on PartialIngress"""
+        finalizers = metadata.get('finalizers', [])
+        finalizer_name = 'partial-ingress.zengarden.space/cleanup'
+
+        if finalizer_name not in finalizers:
+            print(f"  Adding finalizer to PartialIngress: {namespace}/{name}", flush=True)
+            finalizers.append(finalizer_name)
+
+            patch = {
+                'metadata': {
+                    'finalizers': finalizers
+                }
+            }
+
+            try:
+                self.custom_api.patch_namespaced_custom_object(
+                    group='networking.zengarden.space',
+                    version='v1',
+                    namespace=namespace,
+                    plural='partialingresses',
+                    name=name,
+                    body=patch
+                )
+            except Exception as e:
+                print(f"WARNING: Failed to add finalizer: {e}", file=sys.stderr)
+
+    def _remove_finalizer(self, namespace, name):
+        """Remove finalizer from PartialIngress"""
+        print(f"  Removing finalizer from PartialIngress: {namespace}/{name}", flush=True)
+
+        # Get current object to check finalizers
+        try:
+            obj = self.custom_api.get_namespaced_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                namespace=namespace,
+                plural='partialingresses',
+                name=name
+            )
+
+            finalizers = obj.get('metadata', {}).get('finalizers', [])
+            finalizer_name = 'partial-ingress.zengarden.space/cleanup'
+
+            if finalizer_name in finalizers:
+                finalizers.remove(finalizer_name)
+
+                patch = {
+                    'metadata': {
+                        'finalizers': finalizers
+                    }
+                }
+
+                self.custom_api.patch_namespaced_custom_object(
+                    group='networking.zengarden.space',
+                    version='v1',
+                    namespace=namespace,
+                    plural='partialingresses',
+                    name=name,
+                    body=patch
+                )
+                print(f"  Removed finalizer from PartialIngress: {namespace}/{name}", flush=True)
+        except ApiException as e:
+            if e.status == 404:
+                # Object already deleted, that's fine
+                print(f"  PartialIngress already deleted: {namespace}/{name}", flush=True)
+            else:
+                print(f"WARNING: Failed to remove finalizer: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: Failed to remove finalizer: {e}", file=sys.stderr)
+
+    def _cleanup_replicated_ingresses(self, namespace, name, uid):
+        """Delete all Ingresses replicated by this PartialIngress"""
+        print(f"  Searching for replicated Ingresses created by {namespace}/{name}", flush=True)
+
+        try:
+            # Find all Ingresses with our labels
+            all_ingresses = self.networking_v1.list_ingress_for_all_namespaces(
+                label_selector=f'partial-ingress.zengarden.space/replicated=true,'
+                               f'partial-ingress.zengarden.space/pi-namespace={namespace},'
+                               f'partial-ingress.zengarden.space/pi-name={name}'
+            )
+
+            deleted_count = 0
+            for ing in all_ingresses.items:
+                # Double-check the annotation matches our UID
+                annotations = ing.metadata.annotations or {}
+                source_uid = annotations.get('partial-ingress.zengarden.space/source-partial-ingress-uid')
+
+                if source_uid == uid:
+                    print(f"  Deleting replicated Ingress: {ing.metadata.namespace}/{ing.metadata.name}", flush=True)
+                    try:
+                        self.networking_v1.delete_namespaced_ingress(
+                            name=ing.metadata.name,
+                            namespace=ing.metadata.namespace
+                        )
+                        deleted_count += 1
+                    except ApiException as e:
+                        if e.status != 404:
+                            print(f"WARNING: Failed to delete Ingress {ing.metadata.namespace}/{ing.metadata.name}: {e}", file=sys.stderr)
+
+            print(f"  Deleted {deleted_count} replicated Ingress(es)", flush=True)
+
+        except Exception as e:
+            print(f"ERROR: Failed to cleanup replicated Ingresses: {e}", file=sys.stderr)
+
+    def _update_partial_ingress_status(self, namespace, name, replicated_ingresses):
+        """Update PartialIngress status"""
+        timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        status = {
+            'status': {
+                'generatedIngress': name,
+                'replicatedIngresses': replicated_ingresses,
+                'lastUpdated': timestamp
+            }
+        }
+
+        try:
+            self.custom_api.patch_namespaced_custom_object_status(
+                group='networking.zengarden.space',
+                version='v1',
+                namespace=namespace,
+                plural='partialingresses',
+                name=name,
+                body=status
+            )
+            print(f"  Updated status for PartialIngress: {namespace}/{name}", flush=True)
+        except Exception as e:
+            print(f"WARNING: Failed to update status: {e}", file=sys.stderr)
+
+    def process_composite_ingress_host(self, binding_context):
+        """Process a CompositeIngressHost event"""
+        try:
+            context_data = json.loads(binding_context)
+
+            if not context_data or len(context_data) == 0:
+                raise Exception("Empty binding context")
+
+            binding = context_data[0]
+
+            # Handle both single object and multiple objects
+            objects = []
+            if 'object' in binding:
+                objects = [{'object': binding['object']}]
+            elif 'objects' in binding:
+                objects = binding['objects']
+
+            if not objects:
+                print("WARNING: No objects in binding context", file=sys.stderr)
+                return
+
+            # Process each CompositeIngressHost
+            for obj_wrapper in objects:
+                obj = obj_wrapper.get('object', {})
+                self._process_single_composite_ingress_host(obj)
+
+        except Exception as e:
+            print(f"ERROR in process_composite_ingress_host: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def _process_single_composite_ingress_host(self, obj):
+        """Process a single CompositeIngressHost object"""
+        metadata = obj.get('metadata', {})
+        spec = obj.get('spec', {})
+
+        namespace = metadata.get('namespace')
+        name = metadata.get('name')
+
+        base_host = spec.get('baseHost')
+        ingress_class_name = spec.get('ingressClassName')
+
+        print(f"Processing CompositeIngressHost: {namespace}/{name}", flush=True)
+        print(f"  BaseHost: {base_host}", flush=True)
+
+        # Scan for base Ingresses
+        base_ingresses = self.find_base_ingresses(base_host, ingress_class_name)
+
+        print(f"  Discovered {len(base_ingresses)} Ingresses", flush=True)
+
+        # Update status
+        self._update_composite_host_status(namespace, name, len(base_ingresses))
+
+        print(f"✓ Successfully processed CompositeIngressHost: {namespace}/{name}", flush=True)
+
+    def _update_composite_host_status(self, namespace, name, discovered_count):
+        """Update CompositeIngressHost status"""
+        timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        status = {
+            'status': {
+                'discoveredIngresses': discovered_count,
+                'lastScanned': timestamp
+            }
+        }
+
+        try:
+            self.custom_api.patch_namespaced_custom_object_status(
+                group='networking.zengarden.space',
+                version='v1',
+                namespace=namespace,
+                plural='compositeingresshosts',
+                name=name,
+                body=status
+            )
+            print(f"  Updated status for CompositeIngressHost: {namespace}/{name}", flush=True)
+        except Exception as e:
+            print(f"WARNING: Failed to update status: {e}", file=sys.stderr)
+
+
+def watch_requests(service, shared_dir='/shared'):
+    """Watch for request files and process them"""
+    global shutdown_requested
+
+    print(f'PartialIngress Operator service watching {shared_dir}', flush=True)
+
+    processed = set()
+
+    while not shutdown_requested:
+        try:
+            if not os.path.exists(shared_dir):
+                print(f"Shared directory {shared_dir} does not exist, waiting...", file=sys.stderr, flush=True)
+                time.sleep(1)
+                continue
+
+            files = os.listdir(shared_dir)
+            request_files = [f for f in files if f.startswith('request-') and f.endswith('.json')]
+
+            for req_file in request_files:
+                if shutdown_requested:
+                    print("[shutdown] Stopping request processing...", flush=True)
+                    break
+
+                if req_file in processed:
+                    continue
+
+                req_path = os.path.join(shared_dir, req_file)
+                request_id = req_file.replace('request-', '').replace('.json', '')
+                resp_path = os.path.join(shared_dir, f'response-{request_id}.txt')
+
+                try:
+                    # Read request
+                    with open(req_path, 'r') as f:
+                        binding_context = f.read()
+
+                    print(f"[handler] Processing request from {req_file}", flush=True)
+
+                    # Determine which handler to call based on context
+                    # We'll use a simple approach: check the first object's kind
+                    try:
+                        context_data = json.loads(binding_context)
+                        if context_data and len(context_data) > 0:
+                            binding = context_data[0]
+                            obj = binding.get('object', {}) or (binding.get('objects', [{}])[0].get('object', {}))
+                            kind = obj.get('kind', '')
+
+                            if kind == 'PartialIngress':
+                                service.process_partial_ingress(binding_context)
+                            elif kind == 'CompositeIngressHost':
+                                service.process_composite_ingress_host(binding_context)
+                            else:
+                                print(f"WARNING: Unknown kind: {kind}", file=sys.stderr)
+
+                        response = "OK"
+                        print(f"[handler] Successfully processed request", flush=True)
+                    except Exception as e:
+                        response = f"ERROR: {e}"
+                        print(f"ERROR processing request: {e}", file=sys.stderr, flush=True)
+                        import traceback
+                        traceback.print_exc()
+
+                    # Write response
+                    with open(resp_path, 'w') as f:
+                        f.write(response)
+
+                    print(f"[handler] Wrote response to {os.path.basename(resp_path)}", flush=True)
+                    processed.add(req_file)
+
+                except Exception as e:
+                    print(f"ERROR handling {req_file}: {e}", file=sys.stderr)
+                    try:
+                        with open(resp_path, 'w') as f:
+                            f.write(f"ERROR: {e}")
+                    except:
+                        pass
+
+            # Clean up old processed files
+            current_time = time.time()
+            for filename in list(processed):
+                if not os.path.exists(os.path.join(shared_dir, filename)):
+                    processed.discard(filename)
+
+            time.sleep(0.1)
+
+        except KeyboardInterrupt:
+            print("\n[shutdown] Keyboard interrupt received", flush=True)
+            break
+        except Exception as e:
+            if not shutdown_requested:
+                print(f"ERROR in watch loop: {e}", file=sys.stderr, flush=True)
+                time.sleep(1)
+            else:
+                break
+
+    print("[shutdown] Service stopped cleanly", flush=True)
+
+
+if __name__ == '__main__':
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Initialize service
+    service = PartialIngressService()
+
+    # Start watching
+    shared_dir = '/shared'
+
+    try:
+        watch_requests(service, shared_dir)
+    except Exception as e:
+        print(f"FATAL ERROR: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+    sys.exit(0)

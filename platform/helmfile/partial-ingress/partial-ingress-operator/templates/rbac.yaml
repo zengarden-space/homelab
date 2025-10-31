@@ -1,0 +1,49 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "partial-ingress-operator.fullname" . }}
+  labels:
+    {{- include "partial-ingress-operator.labels" . | nindent 4 }}
+rules:
+  # PartialIngress CRD
+  - apiGroups: ["networking.zengarden.space"]
+    resources: ["partialingresses"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["networking.zengarden.space"]
+    resources: ["partialingresses/status"]
+    verbs: ["update", "patch"]
+
+  # CompositeIngressHost CRD
+  - apiGroups: ["networking.zengarden.space"]
+    resources: ["compositeingresshosts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.zengarden.space"]
+    resources: ["compositeingresshosts/status"]
+    verbs: ["update", "patch"]
+
+  # Standard Ingress resources
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "partial-ingress-operator.fullname" . }}
+  labels:
+    {{- include "partial-ingress-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "partial-ingress-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

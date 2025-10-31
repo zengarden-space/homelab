@@ -1,0 +1,70 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: compositeingresshosts.networking.zengarden.space
+spec:
+  group: networking.zengarden.space
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - baseHost
+                - hostPattern
+                - ingressClassName
+              properties:
+                baseHost:
+                  type: string
+                  description: "Base hostname to scan for Ingresses (e.g., app.dev.domain.com)"
+                  minLength: 1
+                hostPattern:
+                  type: string
+                  description: "Glob pattern for PR/CI hostnames (e.g., app-*.domain.com)"
+                  minLength: 1
+                ingressClassName:
+                  type: string
+                  description: "Ingress class to match"
+                  minLength: 1
+            status:
+              type: object
+              properties:
+                discoveredIngresses:
+                  type: integer
+                  description: "Number of Ingresses discovered in base environment"
+                lastScanned:
+                  type: string
+                  format: date-time
+                  description: "Timestamp of last scan"
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: BaseHost
+          type: string
+          jsonPath: .spec.baseHost
+        - name: Pattern
+          type: string
+          jsonPath: .spec.hostPattern
+        - name: IngressClass
+          type: string
+          jsonPath: .spec.ingressClassName
+        - name: Discovered
+          type: integer
+          jsonPath: .status.discoveredIngresses
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: compositeingresshosts
+    singular: compositeingresshost
+    kind: CompositeIngressHost
+    shortNames:
+      - cih

@@ -1,0 +1,75 @@
+# Default values for partial-ingress-operator
+
+# Operator configuration
+operator:
+  replicaCount: 1
+
+  image:
+    repository: flant/shell-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  logLevel: "info"
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# Handler sidecar configuration (Python with Kubernetes client)
+handlerSidecar:
+  image:
+    repository: python
+    tag: "3.11-alpine"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Home directory PVC for pip packages
+  home:
+    storageClassName: ""  # Use default storage class if empty
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: partial-ingress-operator
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: partialingresses.networking.zengarden.space
+spec:
+  group: networking.zengarden.space
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: "Identical to Ingress spec - drop-in replacement for Ingress"
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                generatedIngress:
+                  type: string
+                  description: "Name of the generated Ingress"
+                replicatedIngresses:
+                  type: array
+                  description: "List of replicated Ingress resources"
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      sourceIngress:
+                        type: string
+                lastUpdated:
+                  type: string
+                  format: date-time
+                  description: "Timestamp of last update"
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Host
+          type: string
+          jsonPath: .spec.rules[0].host
+        - name: IngressClass
+          type: string
+          jsonPath: .spec.ingressClassName
+        - name: Updated
+          type: string
+          jsonPath: .status.lastUpdated
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: partialingresses
+    singular: partialingress
+    kind: PartialIngress
+    shortNames:
+      - ping

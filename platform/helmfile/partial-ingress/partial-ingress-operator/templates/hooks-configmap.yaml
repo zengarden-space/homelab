@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "partial-ingress-operator.fullname" . }}-hooks
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "partial-ingress-operator.labels" . | nindent 4 }}
+data:
+  partial-ingress-handler.sh: |
+{{ .Files.Get "files/partial-ingress-handler.sh" | indent 4 }}

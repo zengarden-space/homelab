@@ -16,3 +16,6 @@ helmfiles:
 
   # Analytics
   - path: metabase/helmfile.yaml.gotmpl
+
+  # Networking
+  - path: partial-ingress/helmfile.yaml.gotmpl

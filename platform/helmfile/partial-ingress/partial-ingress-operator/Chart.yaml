@@ -1,0 +1,12 @@
+apiVersion: v2
+name: partial-ingress-operator
+description: Kubernetes operator for partial environment deployments with ingress replication
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ingress
+  - networking
+  - kubernetes
+  - operator
+  - partial-deployment

@@ -1,0 +1,9 @@
+helmDefaults:
+  wait: true
+  timeout: 600
+
+releases:
+  - name: partial-ingress-operator
+    namespace: partial-ingress-system
+    chart: ./partial-ingress-operator
+    createNamespace: true

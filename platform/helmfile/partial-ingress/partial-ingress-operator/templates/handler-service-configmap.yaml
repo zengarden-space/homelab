@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "partial-ingress-operator.fullname" . }}-handler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "partial-ingress-operator.labels" . | nindent 4 }}
+data:
+  requirements.txt: |
+{{ .Files.Get "files/requirements.txt" | indent 4 }}
+  partial-ingress-service.py: |
+{{ .Files.Get "files/partial-ingress-service.py" | indent 4 }}

@@ -1,0 +1,55 @@
+PartialIngress Operator has been deployed!
+
+The operator is now watching for:
+- PartialIngress resources (networking.zengarden.space/v1)
+- CompositeIngressHost resources (networking.zengarden.space/v1)
+
+To create a PartialIngress for a PR environment:
+
+1. Create a CompositeIngressHost in your base namespace:
+
+   apiVersion: networking.zengarden.space/v1
+   kind: CompositeIngressHost
+   metadata:
+     name: myapp-composite
+     namespace: dev-myapp
+   spec:
+     baseHost: "myapp.dev.domain.com"
+     hostPattern: "myapp-*.domain.com"
+     ingressClassName: internal
+
+2. Create a PartialIngress in your PR namespace:
+
+   apiVersion: networking.zengarden.space/v1
+   kind: PartialIngress
+   metadata:
+     name: myapp
+     namespace: ci-pr-123-myapp
+   spec:
+     ingressClassName: internal
+     rules:
+     - host: myapp-pr-123.domain.com
+       http:
+         paths:
+         - path: /
+           pathType: Prefix
+           backend:
+             service:
+               name: myapp
+               port:
+                 number: 80
+
+The operator will automatically:
+- Generate a standard Ingress from your PartialIngress
+- Scan base environment for other Ingresses matching baseHost
+- Replicate those Ingresses to their original namespaces with the new hostname
+- Skip paths that are overridden by your PartialIngress
+
+Check operator logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "partial-ingress-operator.name" . }} -c handler-service
+
+View PartialIngresses:
+  kubectl get partialingresses --all-namespaces
+
+View CompositeIngressHosts:
+  kubectl get compositeingresshosts --all-namespaces

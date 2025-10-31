@@ -1,0 +1,203 @@
+---
+# Example: Complete PartialIngress setup for retroboard application
+# This demonstrates a full setup with dev environment and CI environment
+
+# =============================================================================
+# DEV ENVIRONMENT (Base)
+# =============================================================================
+
+# Frontend Service (dev-retroboard namespace)
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-retroboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retroboard
+  namespace: dev-retroboard
+spec:
+  selector:
+    app: retroboard
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retroboard
+  namespace: dev-retroboard
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: internal
+  rules:
+  - host: retroboard.homelab.int.zengarden.space
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: retroboard
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - retroboard.homelab.int.zengarden.space
+    secretName: retroboard-tls
+---
+apiVersion: networking.zengarden.space/v1
+kind: CompositeIngressHost
+metadata:
+  name: retroboard-composite
+  namespace: dev-retroboard
+spec:
+  baseHost: "retroboard.homelab.int.zengarden.space"
+  hostPattern: "retroboard-*.homelab.int.zengarden.space"
+  ingressClassName: internal
+
+# Backend Service (dev-retroboard-api namespace)
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-retroboard-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retroboard-api
+  namespace: dev-retroboard-api
+spec:
+  selector:
+    app: retroboard-api
+  ports:
+    - port: 80
+      targetPort: 4000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retroboard-api
+  namespace: dev-retroboard-api
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: internal
+  rules:
+  - host: retroboard.homelab.int.zengarden.space  # Same hostname as frontend!
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: retroboard-api
+            port:
+              number: 80
+      - path: /graphql
+        pathType: Prefix
+        backend:
+          service:
+            name: retroboard-api
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - retroboard.homelab.int.zengarden.space
+    secretName: retroboard-api-tls
+---
+apiVersion: networking.zengarden.space/v1
+kind: CompositeIngressHost
+metadata:
+  name: retroboard-composite
+  namespace: dev-retroboard-api
+spec:
+  # Identical spec to frontend - operator will deduplicate
+  baseHost: "retroboard.homelab.int.zengarden.space"
+  hostPattern: "retroboard-*.homelab.int.zengarden.space"
+  ingressClassName: internal
+
+# =============================================================================
+# CI/PR ENVIRONMENT (Deploy ONLY Frontend)
+# =============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-feat-oauth-retroboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retroboard
+  namespace: ci-feat-oauth-retroboard
+spec:
+  selector:
+    app: retroboard
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+# Use PartialIngress instead of Ingress!
+apiVersion: networking.zengarden.space/v1
+kind: PartialIngress
+metadata:
+  name: retroboard
+  namespace: ci-feat-oauth-retroboard
+spec:
+  # Spec is identical to Ingress
+  ingressClassName: internal
+  rules:
+  - host: retroboard-ci-feat-oauth.homelab.int.zengarden.space
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: retroboard
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - retroboard-ci-feat-oauth.homelab.int.zengarden.space
+    secretName: retroboard-tls
+---
+apiVersion: networking.zengarden.space/v1
+kind: CompositeIngressHost
+metadata:
+  name: retroboard-composite
+  namespace: ci-feat-oauth-retroboard
+spec:
+  # Same spec as dev environment
+  baseHost: "retroboard.homelab.int.zengarden.space"
+  hostPattern: "retroboard-*.homelab.int.zengarden.space"
+  ingressClassName: internal
+
+# =============================================================================
+# RESULT
+# =============================================================================
+# The operator will automatically:
+#
+# 1. Create Ingress from PartialIngress in ci-feat-oauth-retroboard namespace:
+#    - Host: retroboard-ci-feat-oauth.homelab.int.zengarden.space
+#    - Path: / -> retroboard service (local)
+#
+# 2. Replicate backend Ingress to dev-retroboard-api namespace:
+#    - Name: retroboard-api-<hash>
+#    - Host: retroboard-ci-feat-oauth.homelab.int.zengarden.space
+#    - Path: /api -> retroboard-api service (in dev-retroboard-api!)
+#    - Path: /graphql -> retroboard-api service (in dev-retroboard-api!)
+#
+# 3. Nginx merges both Ingresses (same hostname, different namespaces):
+#    - GET / -> ci-feat-oauth-retroboard/retroboard
+#    - POST /api/boards -> dev-retroboard-api/retroboard-api
+#    - POST /graphql -> dev-retroboard-api/retroboard-api
+#
+# This allows testing frontend changes against the real dev backend!

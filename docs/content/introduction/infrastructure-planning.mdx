@@ -282,6 +282,7 @@ kube-apiserver-arg:
 | Operator | Purpose | Implementation |
 |----------|---------|----------------|
 | **DerivedSecrets** | Derive passwords from master key using Argon2id | Shell-operator (Bash + argon2) |
+| **PartialIngress** | Partial environment deployments with auto-replication | Shell-operator (Bash + Python) |
 | **Metabase CNPG** | Auto-register CNPG databases in Metabase | Shell-operator (Bash + curl) |
 | **Gitea Automation** | OAuth setup + GitHub sync | Helm hooks (Playwright + Bash) |
 | **Restrictive Proxy** | Path-restricted HTTP proxy for MikroTik API | Node.js systemd service |
