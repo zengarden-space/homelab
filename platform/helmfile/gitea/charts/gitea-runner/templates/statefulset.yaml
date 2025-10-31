@@ -63,6 +63,8 @@ spec:
         volumeMounts:
         - name: docker-sock
           mountPath: /var/run
+        - name: runner-data
+          mountPath: /data
         - name: docker-certs
           mountPath: /certs
   volumeClaimTemplates:

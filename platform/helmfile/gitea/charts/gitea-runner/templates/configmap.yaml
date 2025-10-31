@@ -12,5 +12,7 @@ data:
     container:
       privileged: true
       workdir_parent: /data/workspace
+      valid_volumes:
+        - data
     host:
       workdir_parent: /data/act

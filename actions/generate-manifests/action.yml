@@ -1,0 +1,86 @@
+name: Generate Manifests
+description: Generate Kubernetes manifests from Helm chart
+
+inputs:
+  environment:
+    description: 'Environment (dev or prod)'
+    required: true
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  image-tag:
+    description: 'Docker image tag'
+    required: true
+  cluster:
+    description: 'Cluster name'
+    required: false
+    default: 'homelab'
+
+outputs:
+  manifest-file:
+    description: 'Path to generated manifest file'
+    value: ${{ steps.generate.outputs.manifest-file }}
+  project-name:
+    description: 'Resolved project name'
+    value: ${{ steps.project.outputs.name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.12.0'
+
+    - name: Check values file existence
+      id: check-values
+      shell: bash
+      run: |
+        values_file="./helm/values-${{ inputs.environment }}.yaml"
+        if [ -f "$values_file" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "Values file exists: $values_file"
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "Values file not found: $values_file"
+          echo "::error::Values file $values_file does not exist"
+          exit 1
+        fi
+
+    - name: Generate manifest
+      id: generate
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        chart_path="./helm/$project_name"
+        values_file="./helm/values-${{ inputs.environment }}.yaml"
+        manifest_file="manifest-${{ inputs.environment }}.yaml"
+
+        echo "Generating manifest for ${{ inputs.environment }} environment"
+        echo "Cluster: ${{ inputs.cluster }}"
+        echo "Project: $project_name"
+        echo "Chart path: $chart_path"
+        echo "Values file: $values_file"
+        echo "Image tag: ${{ inputs.image-tag }}"
+
+        helm template "$project_name" "$chart_path" \
+          --namespace ${{ inputs.environment }}-$project_name \
+          --values "$values_file" \
+          --set image.tag=${{ inputs.image-tag }} \
+          > "$manifest_file"
+
+        echo "manifest-file=$manifest_file" >> $GITHUB_OUTPUT
+        echo "Generated manifest: $manifest_file"

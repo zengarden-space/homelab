@@ -1,0 +1,152 @@
+name: Review Manifests
+description: Create a pull request for manifest review in the manifests repository
+
+inputs:
+  environment:
+    description: 'Environment (dev or prod)'
+    required: true
+  project-name:
+    description: 'Project name'
+    required: false
+    default: ''
+  cluster:
+    description: 'Cluster name'
+    required: false
+    default: 'homelab'
+  manifest-file:
+    description: 'Path to manifest file to push'
+    required: true
+  manifests-repo:
+    description: 'Manifests repository (owner/repo)'
+    required: false
+    default: 'zengarden-space/manifests'
+  branch-name:
+    description: 'Branch name in manifests repo'
+    required: false
+    default: ''
+  token:
+    description: 'GitHub/Gitea token with write access to manifests repo'
+    required: true
+  gitea-url:
+    description: 'Gitea instance URL'
+    required: false
+    default: 'https://gitea.homelab.int.zengarden.space'
+
+outputs:
+  pr-exists:
+    description: 'Whether a PR already exists (true/false)'
+    value: ${{ steps.check_pr.outputs.pr_exists }}
+  pr-created:
+    description: 'Whether a new PR was created (true/false)'
+    value: ${{ steps.create_pr.outputs.pr_created }}
+
+runs:
+  using: composite
+  steps:
+    - name: Determine project name
+      id: project
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.project-name }}" ]; then
+          project_name="${{ inputs.project-name }}"
+        else
+          project_name=$(echo ${{ github.repository }} | cut -d'/' -f2)
+        fi
+        echo "name=$project_name" >> $GITHUB_OUTPUT
+        echo "Project name: $project_name"
+
+    - name: Determine branch name
+      id: branch
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.branch-name }}" ]; then
+          branch_name="${{ inputs.branch-name }}"
+        else
+          branch_name="${{ inputs.environment }}-${{ steps.project.outputs.name }}"
+        fi
+        echo "name=$branch_name" >> $GITHUB_OUTPUT
+        echo "Branch name: $branch_name"
+
+    - name: Checkout manifests repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.manifests-repo }}
+        ref: 'main'
+        path: manifests-repo
+        token: ${{ inputs.token }}
+
+    - name: Check for existing PR
+      id: check_pr
+      shell: bash
+      run: |
+        cd manifests-repo
+
+        # Check if PR exists using Gitea API
+        pr_exists=$(curl -s -H "Authorization: token ${{ inputs.token }}" \
+          "${{ inputs.gitea-url }}/api/v1/repos/${{ inputs.manifests-repo }}/pulls?state=open" \
+          | jq --arg branch "${{ steps.branch.outputs.name }}" '[.[] | select(.head.ref == $branch)] | length')
+
+        echo "pr_exists=$pr_exists" >> $GITHUB_OUTPUT
+        echo "Found $pr_exists existing PRs for branch ${{ steps.branch.outputs.name }}"
+
+    - name: Create branch and push changes
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        cd manifests-repo
+        git config --local user.name "Gitea Actions Bot"
+        git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+        # Create and switch to branch
+        git checkout -B ${{ steps.branch.outputs.name }}
+
+        # Create directory and copy manifest
+        mkdir -p ./${{ inputs.cluster }}/${{ inputs.environment }}/$project_name
+        cp ../${{ inputs.manifest-file }} ./${{ inputs.cluster }}/${{ inputs.environment }}/$project_name/manifest.yaml
+        git add .
+
+        # Check if there are changes to commit
+        if ! git diff --cached --quiet; then
+          git commit -m "Deploy ${{ github.repository }} to ${{ inputs.environment }}: ${{ github.event.head_commit.message }} ${{ github.sha }}"
+          git push -f origin ${{ steps.branch.outputs.name }}
+        else
+          echo "No changes to commit"
+        fi
+
+    - name: Create Pull Request
+      id: create_pr
+      if: steps.check_pr.outputs.pr_exists == '0'
+      shell: bash
+      run: |
+        project_name="${{ steps.project.outputs.name }}"
+        commit_msg=$(echo '${{ github.event.head_commit.message }}' | sed 's/"/\\"/g')
+
+        # Create PR using Gitea API
+        response=$(curl -s -w "\n%{http_code}" -X POST \
+          -H "Authorization: token ${{ inputs.token }}" \
+          -H "Content-Type: application/json" \
+          "${{ inputs.gitea-url }}/api/v1/repos/${{ inputs.manifests-repo }}/pulls" \
+          -d @- <<EOF
+        {
+          "title": "Deploy $project_name to ${{ inputs.environment }}",
+          "body": "Auto-generated PR to deploy ${{ github.repository }} to ${{ inputs.environment }} environment.\n\nCluster: ${{ inputs.cluster }}\nCommit: ${{ github.sha }}\nMessage: ${commit_msg}",
+          "head": "${{ steps.branch.outputs.name }}",
+          "base": "main"
+        }
+        EOF
+        )
+
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d')
+
+        echo "HTTP Status Code: $http_code"
+        echo "Response Body: $body"
+
+        if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+          echo "Pull request created successfully"
+          echo "pr_created=true" >> $GITHUB_OUTPUT
+        else
+          echo "Failed to create pull request"
+          echo "pr_created=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
