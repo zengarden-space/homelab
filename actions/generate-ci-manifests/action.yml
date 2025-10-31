@@ -109,7 +109,7 @@ runs:
         helm template "$project_name" "$chart_path" \
           --namespace ci-${env_id}-$project_name \
           --values "$values_file" \
-          --set image.tag=${{ inputs.image.tag }} \
+          --set image.tag=${{ inputs.image-tag }} \
           > "$manifest_file"
 
         echo "manifest-file=$manifest_file" >> $GITHUB_OUTPUT
