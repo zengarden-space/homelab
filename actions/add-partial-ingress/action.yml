@@ -58,11 +58,10 @@ runs:
         echo "Project: $project_name"
         echo "Base domain: $base_domain"
 
-        # Install PyYAML if not available
-        if ! python3 -c "import yaml" 2>/dev/null; then
-          echo "Installing PyYAML..."
-          pip3 install --quiet PyYAML
-        fi
+        # Create and activate virtual environment with PyYAML
+        python3 -m venv /tmp/partial-ingress-venv
+        source /tmp/partial-ingress-venv/bin/activate
+        pip install --quiet PyYAML
 
         # Create a Python script to do the conversion
         cat > /tmp/convert-to-partial-ingress.py <<'PYTHON_EOF'
@@ -121,8 +120,8 @@ runs:
 
         PYTHON_EOF
 
-        # Run the conversion
-        python3 /tmp/convert-to-partial-ingress.py "$env_id" "$base_domain" "$manifest_file"
+        # Run the conversion with venv Python
+        /tmp/partial-ingress-venv/bin/python /tmp/convert-to-partial-ingress.py "$env_id" "$base_domain" "$manifest_file"
 
         echo "environment-id=$env_id" >> $GITHUB_OUTPUT
 
