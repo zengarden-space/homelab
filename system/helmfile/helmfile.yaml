@@ -15,4 +15,4 @@ helmfiles:
   - path: external-tunnel/helmfile.yaml.gotmpl
 
   # RBAC
-  - path: rbac-system/helmfile.yaml
+  - path: rbac-system/helmfile.yaml.gotmpl

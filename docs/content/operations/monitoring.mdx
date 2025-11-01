@@ -97,9 +97,148 @@ Password: <from victoria-metrics/env.yaml>
 - Victoria Metrics Dashboard
 - local-path Cluster Monitoring
 
+### Grafana Alert Operator
+
+**Purpose:** Kubernetes operator for managing Grafana alerting resources declaratively
+
+**Why Grafana Alert Operator:**
+- **GitOps-native**: Define alerts, notification policies, and mute timings as Kubernetes CRDs
+- **Declarative**: Alerts live in Git alongside application manifests
+- **Automated**: Reconciles Grafana configuration via HTTP API
+- **Version controlled**: Alert changes tracked in Git history
+
+**Architecture:**
+```
+Kubernetes CRDs (GrafanaAlertRule, etc.)
+    │
+    ▼
+Grafana Alert Operator (shell-operator + Python)
+    │
+    ├─> Reads CRD changes via Kubernetes API
+    ├─> Reconciles via Grafana Provisioning HTTP API
+    └─> Updates CRD status
+    │
+    ▼
+Grafana Alert Manager (built-in)
+```
+
+**Custom Resource Definitions:**
+
+1. **GrafanaAlertRule**: Define Prometheus-style alert rules
+2. **GrafanaNotificationPolicy**: Route alerts to specific receivers
+3. **GrafanaMuteTiming**: Schedule alert muting windows
+4. **GrafanaNotificationTemplate**: Custom notification templates
+
+**Example Alert Rule:**
+```yaml
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaAlertRule
+metadata:
+  name: high-cpu-usage
+  namespace: monitoring
+spec:
+  grafanaRef:
+    name: grafana-service-account
+    namespace: victoria-metrics
+  folderUID: homelab-alerts
+  ruleGroup: infrastructure
+  title: High CPU Usage
+  condition: B
+  noDataState: NoData
+  execErrState: Alerting
+  for: 5m
+  annotations:
+    summary: "High CPU usage on {{ $labels.instance }}"
+    description: "CPU usage is {{ $value }}% for more than 5 minutes."
+  labels:
+    severity: warning
+  data:
+    - refId: A
+      queryType: prometheus
+      datasourceUid: victoria-metrics
+      expr: |
+        100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+      intervalMs: 1000
+      maxDataPoints: 43200
+    - refId: B
+      queryType: math
+      datasourceUid: __expr__
+      expression: $A > 85
+      reducer: last
+```
+
+**Example Notification Policy:**
+```yaml
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaNotificationPolicy
+metadata:
+  name: default-routing
+  namespace: monitoring
+spec:
+  grafanaRef:
+    name: grafana-service-account
+    namespace: victoria-metrics
+  receiver: gotify-notifications
+  groupBy:
+    - alertname
+    - cluster
+  groupWait: 30s
+  groupInterval: 5m
+  repeatInterval: 4h
+  routes:
+    - receiver: gotify-critical
+      matchers:
+        - severity = critical
+      groupWait: 10s
+      repeatInterval: 1h
+    - receiver: gotify-warnings
+      matchers:
+        - severity = warning
+      repeatInterval: 4h
+```
+
+**Token Provisioning:**
+
+The operator uses a Grafana service account token for API authentication. A separate `grafana-service-account` chart provisions the token:
+
+```yaml
+# Deployed automatically as part of Victoria Metrics stack
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafana-service-account-provision
+  namespace: victoria-metrics
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+```
+
+The job creates a service account in Grafana and stores the token in a Kubernetes Secret (`grafana-service-account-token`), which the operator references.
+
+**Accessing Grafana Alerts:**
+```
+URL: https://grafana.homelab.int.zengarden.space/alerting
+```
+
+**Operator Logs:**
+```bash
+# Shell-operator container (watches Kubernetes events)
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=grafana-alert-operator -c shell-operator
+
+# Handler service container (reconciles Grafana state)
+kubectl -n victoria-metrics logs -l app.kubernetes.io/name=grafana-alert-operator -c handler-service
+```
+
+**Benefits over Manual Configuration:**
+- **GitOps workflow**: Alerts reviewed via pull requests
+- **Namespace isolation**: Teams manage their own alerts
+- **Consistency**: Alerts defined using familiar Kubernetes patterns
+- **Auditability**: Full change history in Git
+
 ### AlertManager
 
 **Purpose:** Alert routing, grouping, and deduplication
+
+**Note:** For Grafana-managed alerts (defined via `GrafanaAlertRule` CRDs), use Grafana's built-in AlertManager. The standalone AlertManager below is used for vmalert rules.
 
 **Access:**
 ```

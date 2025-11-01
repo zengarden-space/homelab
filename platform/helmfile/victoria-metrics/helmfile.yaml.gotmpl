@@ -22,6 +22,44 @@ releases:
     chart: oci://ghcr.io/prometheus-community/charts/prometheus-operator-crds
     version: 24.0.1
 
+  # Grafana Service Account Provisioner (creates token for alert operator)
+  - name: grafana-service-account
+    namespace: victoria-metrics
+    chart: ./charts/grafana-service-account
+    needs:
+      - victoria-metrics/vm
+    values:
+      - grafana:
+          url: "http://vm-grafana.victoria-metrics.svc.cluster.local"
+          orgId: 1
+          adminSecretName: "vm-grafana"
+          adminUserKey: "admin-user"
+          adminPasswordKey: "admin-password"
+        serviceAccount:
+          name: "kubernetes-alert-operator"
+          role: "Editor"
+        secret:
+          name: "grafana-operator-token"
+          namespace: "victoria-metrics"
+
+  # Grafana Alert Operator (manages alerts via CRDs)
+  - name: grafana-alert-operator
+    namespace: victoria-metrics
+    chart: ./grafana-alert-operator
+    needs:
+      - victoria-metrics/grafana-service-account
+    values:
+      - persistence:
+          enabled: true
+          size: 200Mi
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+
   - name: vm
     namespace: victoria-metrics
     chart: oci://ghcr.io/victoriametrics/helm-charts/victoria-metrics-k8s-stack

@@ -82,23 +82,11 @@ runs:
             if doc and doc.get('kind') == 'Ingress':
                 print(f"Found Ingress: {doc['metadata']['name']}")
 
-                # Convert to PartialIngress
+                # Convert to PartialIngress - only change apiVersion and kind
                 doc['apiVersion'] = 'networking.zengarden.space/v1'
                 doc['kind'] = 'PartialIngress'
 
-                # Hostnames are already correct from template, no replacement needed
-                print("  Keeping hostnames as-is (set by values template)")
-
-                # Remove TLS section (PartialIngress doesn't need it)
-                if 'tls' in doc.get('spec', {}):
-                    del doc['spec']['tls']
-                    print("  Removed TLS section")
-
-                # Remove cert-manager annotation
-                if 'annotations' in doc.get('metadata', {}):
-                    doc['metadata']['annotations'].pop('cert-manager.io/cluster-issuer', None)
-                    doc['metadata']['annotations'].pop('external-dns.alpha.kubernetes.io/hostname', None)
-                    print("  Removed cert-manager and external-dns annotations")
+                print("  Converted to PartialIngress (preserving all other fields)")
 
                 modified = True
 

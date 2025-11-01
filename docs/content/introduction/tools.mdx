@@ -663,6 +663,76 @@ spec:
 # with myapp-pr-123.domain.com hostname
 ```
 
+### Grafana Alert Operator (Shell-Operator + Python)
+
+**Purpose:** Manage Grafana alerting resources declaratively via Kubernetes CRDs
+
+**Why Custom:**
+- **GitOps-native alerting**: Alerts live in Git alongside application manifests
+- **Declarative configuration**: Define alerts, notification policies, mute timings as K8s resources
+- **Version control**: Full change history for alerting configuration
+- **Namespace isolation**: Teams manage their own alerts
+- **Automated reconciliation**: Syncs CRDs to Grafana via HTTP API
+
+**How It Works:**
+```
+1. Developer defines GrafanaAlertRule CRD
+2. Shell-operator detects CRD change (Add/Modify/Delete)
+3. Python service reconciles via Grafana Provisioning API
+4. Grafana evaluates alert rules and fires to AlertManager
+5. Operator updates CRD status with UID and sync status
+```
+
+**CRDs:**
+- **GrafanaAlertRule**: Prometheus-style alert rules with queries
+- **GrafanaNotificationPolicy**: Alert routing and grouping policies
+- **GrafanaMuteTiming**: Schedule-based alert muting
+- **GrafanaNotificationTemplate**: Custom notification message templates
+
+**Implementation:**
+- Shell-operator for event watching
+- Python service for Grafana API operations
+- File-based IPC between containers (`/shared/binding-context.json`)
+- Service account token authentication
+- Finalizers for cleanup on deletion
+- Status subresources for observability
+
+**Example CRD:**
+```yaml
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaAlertRule
+metadata:
+  name: high-cpu-usage
+  namespace: monitoring
+spec:
+  grafanaRef:
+    name: grafana-service-account
+    namespace: victoria-metrics
+  folderUID: homelab-alerts
+  ruleGroup: infrastructure
+  title: High CPU Usage
+  condition: B
+  data:
+    - refId: A
+      queryType: prometheus
+      expr: 100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+    - refId: B
+      queryType: math
+      expression: $A > 85
+status:
+  uid: alert_rule_abc123  # Managed by operator
+  syncStatus: Synced
+  lastSynced: "2025-11-01T10:00:00Z"
+```
+
+**Token Provisioning:**
+
+A companion `grafana-service-account` chart provisions API tokens:
+- Helm post-install/post-upgrade hook job
+- Creates service account in Grafana via HTTP API
+- Generates long-lived token with `admin` permissions
+- Stores token in Kubernetes Secret for operator consumption
+
 ### Metabase CNPG Operator (Shell-Operator)
 
 **Purpose**: Auto-register CNPG databases in Metabase

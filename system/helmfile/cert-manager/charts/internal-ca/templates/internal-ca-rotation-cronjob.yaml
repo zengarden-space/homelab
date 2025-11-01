@@ -9,13 +9,23 @@ spec:
       template:
         spec:
           serviceAccountName: rotation-job
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: rotation
-              image: ghcr.io/oleksiyp/tools-image:sha-10fd3cb
+              image: alpine/curl:8.14.1
               securityContext:
                 readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
               command:
-                - bash
+                - sh
                 - /tmp/code/rotate.sh
               workingDir: /tmp
               volumeMounts:
