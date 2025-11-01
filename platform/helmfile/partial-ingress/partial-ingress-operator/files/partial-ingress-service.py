@@ -246,9 +246,14 @@ class PartialIngressService:
         print(f"Processing PartialIngress: {namespace}/{name}", flush=True)
 
         # Handle deletion - check if we need to cleanup orphaned replicated Ingresses
+        # and trigger reconciliation of other PartialIngresses with same hostname
         if deletion_timestamp:
             print(f"  PartialIngress is being deleted, checking for orphaned replicated Ingresses", flush=True)
             self._cleanup_orphaned_replicated_ingresses()
+
+            # Trigger reconciliation of other PartialIngresses that share the same hostname
+            # because path override map has changed
+            self._reconcile_related_partial_ingresses(obj)
             return
 
         # Extract hostname from PartialIngress
@@ -519,6 +524,81 @@ class PartialIngressService:
             rules=spec_dict.get('rules'),
             tls=spec_dict.get('tls')
         )
+
+    def _reconcile_related_partial_ingresses(self, deleted_obj):
+        """
+        Reconcile other PartialIngresses that share the same hostname.
+        When a PartialIngress is deleted, other PartialIngresses with the same hostname
+        may need to create new replicated Ingresses for paths that are no longer overridden.
+        """
+        metadata = deleted_obj.get('metadata', {})
+        spec = deleted_obj.get('spec', {})
+
+        # Extract hostname from deleted PartialIngress
+        rules = spec.get('rules', [])
+        if not rules:
+            print("  No rules in deleted PartialIngress, skipping reconciliation", flush=True)
+            return
+
+        hostname = rules[0].get('host', '')
+        if not hostname:
+            print("  No host in deleted PartialIngress, skipping reconciliation", flush=True)
+            return
+
+        ingress_class_name = spec.get('ingressClassName', '')
+
+        print(f"  Triggering reconciliation for related PartialIngresses with hostname: {hostname}", flush=True)
+
+        try:
+            # Find all OTHER PartialIngresses with the same hostname (excluding the one being deleted)
+            all_partial_ingresses = self.custom_api.list_cluster_custom_object(
+                group='networking.zengarden.space',
+                version='v1',
+                plural='partialingresses'
+            ).get('items', [])
+
+            deleted_uid = metadata.get('uid')
+            reconcile_count = 0
+
+            for pi in all_partial_ingresses:
+                pi_metadata = pi.get('metadata', {})
+                pi_spec = pi.get('spec', {})
+                pi_uid = pi_metadata.get('uid')
+
+                # Skip the PartialIngress being deleted
+                if pi_uid == deleted_uid:
+                    continue
+
+                # Skip if being deleted
+                if pi_metadata.get('deletionTimestamp'):
+                    continue
+
+                # Check if this PartialIngress has the same hostname and ingressClassName
+                pi_class = pi_spec.get('ingressClassName')
+                if pi_class != ingress_class_name:
+                    continue
+
+                pi_rules = pi_spec.get('rules', [])
+                for rule in pi_rules:
+                    pi_hostname = rule.get('host', '')
+                    if pi_hostname == hostname:
+                        # Found a matching PartialIngress - reprocess it
+                        pi_namespace = pi_metadata.get('namespace')
+                        pi_name = pi_metadata.get('name')
+                        print(f"  Reconciling PartialIngress: {pi_namespace}/{pi_name}", flush=True)
+                        self._process_single_partial_ingress(pi)
+                        reconcile_count += 1
+                        break
+
+            if reconcile_count > 0:
+                print(f"  Reconciled {reconcile_count} related PartialIngress(es)", flush=True)
+            else:
+                print(f"  No related PartialIngresses found to reconcile", flush=True)
+
+        except Exception as e:
+            print(f"ERROR: Failed to reconcile related PartialIngresses: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
 
     def _cleanup_orphaned_replicated_ingresses(self):
         """
