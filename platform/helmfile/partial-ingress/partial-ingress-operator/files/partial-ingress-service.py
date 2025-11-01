@@ -267,6 +267,9 @@ class PartialIngressService:
         print(f"  Hostname: {hostname}", flush=True)
         print(f"  IngressClass: {ingress_class_name}", flush=True)
 
+        # 0. Delete old replicated Ingresses for this hostname FIRST (prevents conflicts)
+        self._delete_replicated_ingresses_for_hostname(hostname, ingress_class_name)
+
         # 1. Generate Ingress from PartialIngress in the same namespace (owned by PartialIngress)
         self._generate_ingress_from_partial(obj)
 
@@ -577,6 +580,41 @@ class PartialIngressService:
             print(f"ERROR: Failed to cleanup orphaned replicated Ingresses: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
+
+    def _delete_replicated_ingresses_for_hostname(self, hostname, ingress_class_name):
+        """Delete all replicated Ingresses for a specific hostname across all namespaces"""
+        try:
+            # Find all replicated Ingresses with this hostname label
+            all_ingresses = self.networking_v1.list_ingress_for_all_namespaces(
+                label_selector='partial-ingress.zengarden.space/replicated=true'
+            )
+
+            deleted_count = 0
+            for ing in all_ingresses.items:
+                # Check if this Ingress is for the target hostname
+                ing_hostname = ing.metadata.labels.get('partial-ingress.zengarden.space/hostname', '')
+
+                # Additional check: verify ingressClassName matches
+                if ing_hostname == hostname and ing.spec.ingress_class_name == ingress_class_name:
+                    print(f"  Deleting old replicated Ingress: {ing.metadata.namespace}/{ing.metadata.name}", flush=True)
+                    try:
+                        self.networking_v1.delete_namespaced_ingress(
+                            name=ing.metadata.name,
+                            namespace=ing.metadata.namespace
+                        )
+                        deleted_count += 1
+                    except ApiException as e:
+                        if e.status != 404:
+                            print(f"WARNING: Failed to delete Ingress {ing.metadata.name}: {e}", file=sys.stderr)
+
+            if deleted_count > 0:
+                print(f"  Deleted {deleted_count} old replicated Ingress(es) for hostname {hostname}", flush=True)
+
+        except ApiException as e:
+            if e.status != 404:
+                print(f"WARNING: Failed to delete old replicated Ingresses for hostname {hostname}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"ERROR: Failed to delete old replicated Ingresses: {e}", file=sys.stderr)
 
     def _delete_replicated_ingresses_for_cih(self, cih_namespace, cih_name):
         """Delete all replicated Ingresses in a CompositeIngressHost namespace"""
