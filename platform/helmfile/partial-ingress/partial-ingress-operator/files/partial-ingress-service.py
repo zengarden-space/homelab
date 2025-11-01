@@ -354,7 +354,7 @@ class PartialIngressService:
                     'app.kubernetes.io/managed-by': 'partial-ingress-operator',
                     'partial-ingress.zengarden.space/source': name
                 },
-                annotations=spec.get('annotations', {}),
+                annotations=metadata.get('annotations', {}),
                 owner_references=[
                     client.V1OwnerReference(
                         api_version='networking.zengarden.space/v1',

@@ -75,10 +75,13 @@ spec:
           env:
             - name: TMPDIR
               value: /tmp
+            - name: PYTHONUSERBASE
+              value: /home/python/.local
           command:
             - /bin/sh
             - -c
             - |
+              export PATH="$PYTHONUSERBASE/bin:$PATH"
               pip install --user -r /scripts/requirements.txt
               python3 /scripts/grafana-alert-service.py
           volumeMounts:
