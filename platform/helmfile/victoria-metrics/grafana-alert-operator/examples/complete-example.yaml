@@ -1,0 +1,148 @@
+# Complete example showing all CRD types
+
+---
+# 1. Alert Rule Example
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaAlertRule
+metadata:
+  name: high-cpu-alert
+  namespace: monitoring
+spec:
+  grafanaRef:
+    secretRef:
+      name: grafana-operator-token
+      namespace: monitoring
+
+  folderUID: "general"
+  ruleGroup: "System Alerts"
+
+  title: "High CPU Usage"
+  condition: "C"
+  noDataState: "NoData"
+  execErrState: "Alerting"
+  for: "5m"
+
+  annotations:
+    summary: "CPU usage is above 80%"
+    description: "CPU usage has been above 80% for more than 5 minutes"
+    runbook_url: "https://wiki.example.com/runbooks/high-cpu"
+
+  labels:
+    severity: "warning"
+    component: "system"
+
+  data:
+    - refId: "A"
+      queryType: "prometheus"
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: "prometheus"
+      model:
+        expr: '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)'
+        refId: "A"
+        intervalMs: 1000
+        maxDataPoints: 43200
+
+    - refId: "C"
+      queryType: "math"
+      relativeTimeRange:
+        from: 600
+        to: 0
+      model:
+        expression: "$A > 80"
+        refId: "C"
+
+---
+# 2. Notification Policy Example
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaNotificationPolicy
+metadata:
+  name: default-policy
+  namespace: monitoring
+spec:
+  grafanaRef:
+    secretRef:
+      name: grafana-operator-token
+      namespace: monitoring
+
+  receiver: "default-contact-point"
+  groupBy: ["alertname", "grafana_folder"]
+  groupWait: "30s"
+  groupInterval: "5m"
+  repeatInterval: "4h"
+
+  routes:
+    - receiver: "critical-alerts"
+      matchers:
+        - label: "severity"
+          match: "="
+          value: "critical"
+      groupWait: "10s"
+      repeatInterval: "1h"
+
+    - receiver: "warning-alerts"
+      matchers:
+        - label: "severity"
+          match: "="
+          value: "warning"
+      groupWait: "1m"
+      repeatInterval: "4h"
+
+---
+# 3. Mute Timing Example
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaMuteTiming
+metadata:
+  name: maintenance-window
+  namespace: monitoring
+spec:
+  grafanaRef:
+    secretRef:
+      name: grafana-operator-token
+      namespace: monitoring
+
+  name: "weekly-maintenance"
+  timeIntervals:
+    # Mute every Sunday 2am-4am
+    - times:
+        - startTime: "02:00"
+          endTime: "04:00"
+      weekdays: ["sunday"]
+
+---
+# 4. Notification Template Example
+apiVersion: monitoring.zengarden.space/v1
+kind: GrafanaNotificationTemplate
+metadata:
+  name: custom-slack-template
+  namespace: monitoring
+spec:
+  grafanaRef:
+    secretRef:
+      name: grafana-operator-token
+      namespace: monitoring
+
+  name: "custom-slack"
+  template: |
+    {{ define "slack.title" }}
+    [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}
+    {{ end }}
+
+    {{ define "slack.text" }}
+    {{ if gt (len .Alerts.Firing) 0 }}
+    *Firing Alerts:*
+    {{ range .Alerts.Firing }}
+    • *{{ .Labels.alertname }}*
+      Summary: {{ .Annotations.summary }}
+      Severity: {{ .Labels.severity }}
+    {{ end }}
+    {{ end }}
+
+    {{ if gt (len .Alerts.Resolved) 0 }}
+    *Resolved Alerts:*
+    {{ range .Alerts.Resolved }}
+    • {{ .Labels.alertname }}
+    {{ end }}
+    {{ end }}
+    {{ end }}

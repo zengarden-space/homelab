@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "grafana-alert-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-alert-operator.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "grafana-alert-operator.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "grafana-alert-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "grafana-alert-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/hooks: {{ include (print $.Template.BasePath "/hooks-configmap.yaml") . | sha256sum }}
+        checksum/service: {{ include (print $.Template.BasePath "/handler-service-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "grafana-alert-operator.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # Shell-operator container
+        - name: shell-operator
+          image: {{ .Values.image.shellOperator }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: LOG_TYPE
+              value: "json"
+          volumeMounts:
+            - name: hooks
+              mountPath: /hooks
+            - name: tmp
+              mountPath: /tmp
+            - name: shell-operator-runtime
+              mountPath: /var/run/shell-operator
+            - name: shared
+              mountPath: /shared
+          livenessProbe:
+            tcpSocket:
+              port: 9115
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9115
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+        # Python handler service container
+        - name: handler-service
+          image: {{ .Values.image.python }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: TMPDIR
+              value: /tmp
+          command:
+            - /bin/sh
+            - -c
+            - |
+              pip install --user -r /scripts/requirements.txt
+              python3 /scripts/grafana-alert-service.py
+          volumeMounts:
+            - name: service-scripts
+              mountPath: /scripts
+            - name: pip-cache
+              mountPath: /home/python
+            - name: shared
+              mountPath: /shared
+            - name: python-tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command:
+                - pgrep
+                - -f
+                - grafana-alert-service.py
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - pgrep
+                - -f
+                - grafana-alert-service.py
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      volumes:
+        - name: hooks
+          configMap:
+            name: {{ include "grafana-alert-operator.fullname" . }}-hooks
+            defaultMode: 0755
+        - name: service-scripts
+          configMap:
+            name: {{ include "grafana-alert-operator.fullname" . }}-service
+            defaultMode: 0755
+        - name: tmp
+          emptyDir: {}
+        - name: shell-operator-runtime
+          emptyDir: {}
+        - name: shared
+          emptyDir: {}
+        - name: python-tmp
+          emptyDir: {}
+
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: pip-cache
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- else }}
+      volumes:
+        - name: pip-cache
+          emptyDir: {}
+  {{- end }}

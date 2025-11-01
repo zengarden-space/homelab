@@ -1,0 +1,126 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: grafananotificationpolicies.monitoring.zengarden.space
+spec:
+  group: monitoring.zengarden.space
+  names:
+    kind: GrafanaNotificationPolicy
+    listKind: GrafanaNotificationPolicyList
+    plural: grafananotificationpolicies
+    singular: grafananotificationpolicy
+    shortNames:
+      - gnp
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - grafanaRef
+                - receiver
+              properties:
+                grafanaRef:
+                  type: object
+                  required:
+                    - secretRef
+                  properties:
+                    secretRef:
+                      type: object
+                      required:
+                        - name
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        key:
+                          type: string
+                          default: token
+                receiver:
+                  type: string
+                  description: Default contact point name
+                groupBy:
+                  type: array
+                  items:
+                    type: string
+                  description: Labels to group alerts by
+                  default: ["grafana_folder", "alertname"]
+                groupWait:
+                  type: string
+                  description: How long to wait before sending initial notification
+                  default: "30s"
+                groupInterval:
+                  type: string
+                  description: How long to wait before sending notifications about new alerts
+                  default: "5m"
+                repeatInterval:
+                  type: string
+                  description: How long to wait before re-sending a notification
+                  default: "4h"
+                matchers:
+                  type: array
+                  description: Label matchers for routing
+                  items:
+                    type: object
+                    required:
+                      - label
+                      - match
+                      - value
+                    properties:
+                      label:
+                        type: string
+                      match:
+                        type: string
+                        enum:
+                          - "="
+                          - "=~"
+                          - "!="
+                          - "!~"
+                      value:
+                        type: string
+                muteTimeIntervals:
+                  type: array
+                  items:
+                    type: string
+                  description: Names of mute timings to apply
+                routes:
+                  type: array
+                  description: Nested routing policies
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                lastSynced:
+                  type: string
+                  format: date-time
+                syncStatus:
+                  type: string
+                  enum:
+                    - Synced
+                    - Failed
+                    - Pending
+                message:
+                  type: string
+      additionalPrinterColumns:
+        - name: Receiver
+          type: string
+          jsonPath: .spec.receiver
+        - name: Status
+          type: string
+          jsonPath: .status.syncStatus
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

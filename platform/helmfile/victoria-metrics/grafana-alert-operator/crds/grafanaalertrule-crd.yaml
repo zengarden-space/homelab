@@ -1,0 +1,173 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: grafanaalertrules.monitoring.zengarden.space
+spec:
+  group: monitoring.zengarden.space
+  names:
+    kind: GrafanaAlertRule
+    listKind: GrafanaAlertRuleList
+    plural: grafanaalertrules
+    singular: grafanaalertrule
+    shortNames:
+      - gar
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - grafanaRef
+                - folderUID
+                - ruleGroup
+                - title
+                - condition
+                - data
+              properties:
+                grafanaRef:
+                  type: object
+                  required:
+                    - secretRef
+                  properties:
+                    secretRef:
+                      type: object
+                      required:
+                        - name
+                      properties:
+                        name:
+                          type: string
+                          description: Name of the Secret containing Grafana credentials
+                        namespace:
+                          type: string
+                          description: Namespace of the Secret (defaults to CR namespace)
+                        key:
+                          type: string
+                          description: Key within Secret containing token (defaults to 'token')
+                          default: token
+                folderUID:
+                  type: string
+                  description: Grafana folder UID where alert rule will be created
+                ruleGroup:
+                  type: string
+                  description: Alert rule group name
+                title:
+                  type: string
+                  description: Alert rule title
+                condition:
+                  type: string
+                  description: Query ref for alert condition (e.g., "C")
+                noDataState:
+                  type: string
+                  description: State when no data is returned
+                  enum:
+                    - NoData
+                    - Alerting
+                    - OK
+                  default: NoData
+                execErrState:
+                  type: string
+                  description: State when query execution fails
+                  enum:
+                    - Alerting
+                    - OK
+                    - Error
+                  default: Alerting
+                for:
+                  type: string
+                  description: Duration to wait before alerting (e.g., "5m")
+                  default: "0s"
+                annotations:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Alert annotations (summary, description, runbook_url, etc.)
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Alert labels for routing and grouping
+                data:
+                  type: array
+                  description: Query and expression definitions
+                  items:
+                    type: object
+                    required:
+                      - refId
+                      - queryType
+                      - relativeTimeRange
+                      - model
+                    properties:
+                      refId:
+                        type: string
+                        description: Reference ID (A, B, C, etc.)
+                      queryType:
+                        type: string
+                        description: Query type (prometheus, loki, math, reduce, etc.)
+                      relativeTimeRange:
+                        type: object
+                        required:
+                          - from
+                          - to
+                        properties:
+                          from:
+                            type: integer
+                            description: Start time in seconds (relative to now)
+                          to:
+                            type: integer
+                            description: End time in seconds (relative to now)
+                      datasourceUid:
+                        type: string
+                        description: Datasource UID (required for data source queries)
+                      model:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        description: Query-specific configuration
+            status:
+              type: object
+              properties:
+                uid:
+                  type: string
+                  description: Grafana-assigned alert rule UID
+                provenance:
+                  type: string
+                  description: Provenance setting
+                lastSynced:
+                  type: string
+                  format: date-time
+                  description: Last successful sync timestamp
+                syncStatus:
+                  type: string
+                  enum:
+                    - Synced
+                    - Failed
+                    - Pending
+                  description: Current sync status
+                message:
+                  type: string
+                  description: Human-readable status message
+      additionalPrinterColumns:
+        - name: Title
+          type: string
+          jsonPath: .spec.title
+        - name: Folder
+          type: string
+          jsonPath: .spec.folderUID
+        - name: Group
+          type: string
+          jsonPath: .spec.ruleGroup
+        - name: Status
+          type: string
+          jsonPath: .status.syncStatus
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

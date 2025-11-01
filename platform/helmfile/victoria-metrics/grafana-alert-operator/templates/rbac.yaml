@@ -1,0 +1,63 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "grafana-alert-operator.fullname" . }}
+  labels:
+    {{- include "grafana-alert-operator.labels" . | nindent 4 }}
+rules:
+  # GrafanaAlertRule permissions
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafanaalertrules"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafanaalertrules/status"]
+    verbs: ["update", "patch"]
+
+  # GrafanaNotificationPolicy permissions
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafananotificationpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafananotificationpolicies/status"]
+    verbs: ["update", "patch"]
+
+  # GrafanaMuteTiming permissions
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafanamutetimings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafanamutetimings/status"]
+    verbs: ["update", "patch"]
+
+  # GrafanaNotificationTemplate permissions
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafananotificationtemplates"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.zengarden.space"]
+    resources: ["grafananotificationtemplates/status"]
+    verbs: ["update", "patch"]
+
+  # Read Secrets for Grafana credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+  # Events for status reporting
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "grafana-alert-operator.fullname" . }}
+  labels:
+    {{- include "grafana-alert-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "grafana-alert-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "grafana-alert-operator.fullname" . }}
+    namespace: {{ .Release.Namespace }}

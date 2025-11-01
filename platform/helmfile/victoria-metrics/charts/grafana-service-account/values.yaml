@@ -1,0 +1,59 @@
+# Grafana connection settings
+grafana:
+  # Grafana service URL (internal cluster URL)
+  url: "http://vmetrics-grafana.monitoring.svc.cluster.local"
+  # Organization ID
+  orgId: 1
+  # Admin credentials secret name (must exist in same namespace)
+  adminSecretName: "vmetrics-grafana"
+  # Keys within admin secret
+  adminUserKey: "admin-user"
+  adminPasswordKey: "admin-password"
+
+# Service account to create in Grafana
+serviceAccount:
+  name: "kubernetes-alert-operator"
+  role: "Editor"  # Editor, Admin, or Viewer
+
+# Kubernetes Secret to create with token
+secret:
+  name: "grafana-operator-token"
+  # Namespace where secret will be created
+  # Default: same as chart release namespace
+  namespace: ""
+
+# Token configuration
+token:
+  name: "k8s-operator-token"
+  # Seconds to live (0 = no expiration)
+  secondsToLive: 0
+
+# Job configuration
+job:
+  image:
+    repository: curlimages/curl
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Additional tools image for kubectl
+  kubectlImage:
+    repository: bitnami/kubectl
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Job retry settings
+  backoffLimit: 3
+
+  # Resource limits
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 200m
+
+# Helm hooks
+hooks:
+  weight: "1"
+  deletePolicy: "before-hook-creation"

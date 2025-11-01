@@ -1,0 +1,206 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "grafana-service-account.fullname" . }}-provision
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "grafana-service-account.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": {{ .Values.hooks.weight | quote }}
+    "helm.sh/hook-delete-policy": {{ .Values.hooks.deletePolicy }}
+spec:
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "grafana-service-account.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "grafana-service-account.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Wait for Grafana to be ready and provision service account
+        - name: provision-service-account
+          image: {{ .Values.job.image.repository }}:{{ .Values.job.image.tag }}
+          imagePullPolicy: {{ .Values.job.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: GRAFANA_URL
+              value: {{ .Values.grafana.url | quote }}
+            - name: GRAFANA_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.adminSecretName }}
+                  key: {{ .Values.grafana.adminUserKey }}
+            - name: GRAFANA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.adminSecretName }}
+                  key: {{ .Values.grafana.adminPasswordKey }}
+            - name: SERVICE_ACCOUNT_NAME
+              value: {{ .Values.serviceAccount.name | quote }}
+            - name: SERVICE_ACCOUNT_ROLE
+              value: {{ .Values.serviceAccount.role | quote }}
+            - name: TOKEN_NAME
+              value: {{ .Values.token.name | quote }}
+            - name: TOKEN_SECONDS_TO_LIVE
+              value: {{ .Values.token.secondsToLive | quote }}
+            - name: GRAFANA_ORG_ID
+              value: {{ .Values.grafana.orgId | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              echo "Waiting for Grafana to be ready..."
+              RETRIES=60
+              RETRY_COUNT=0
+
+              while [ $RETRY_COUNT -lt $RETRIES ]; do
+                if curl -sf "$GRAFANA_URL/api/health" > /dev/null 2>&1; then
+                  echo "Grafana is ready!"
+                  break
+                fi
+                echo "Grafana not ready, waiting... (attempt $((RETRY_COUNT + 1))/$RETRIES)"
+                sleep 5
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+              done
+
+              if [ $RETRY_COUNT -eq $RETRIES ]; then
+                echo "ERROR: Grafana did not become ready in time"
+                exit 1
+              fi
+
+              # Check if service account already exists
+              echo "Checking for existing service account..."
+              SA_LIST=$(curl -s "$GRAFANA_URL/api/serviceaccounts/search?query=$SERVICE_ACCOUNT_NAME" \
+                -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                -H "Content-Type: application/json")
+
+              SA_ID=$(echo "$SA_LIST" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2 || true)
+
+              if [ -z "$SA_ID" ]; then
+                echo "Creating service account '$SERVICE_ACCOUNT_NAME'..."
+                SA_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GRAFANA_URL/api/serviceaccounts" \
+                  -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -H "Content-Type: application/json" \
+                  -d "{
+                    \"name\": \"$SERVICE_ACCOUNT_NAME\",
+                    \"role\": \"$SERVICE_ACCOUNT_ROLE\",
+                    \"isDisabled\": false
+                  }")
+
+                HTTP_CODE=$(echo "$SA_RESPONSE" | tail -n1)
+                RESPONSE_BODY=$(echo "$SA_RESPONSE" | head -n-1)
+
+                if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "200" ]; then
+                  echo "ERROR: Failed to create service account (HTTP $HTTP_CODE)"
+                  echo "Response: $RESPONSE_BODY"
+                  exit 1
+                fi
+
+                SA_ID=$(echo "$RESPONSE_BODY" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+                echo "Service account created with ID: $SA_ID"
+              else
+                echo "Service account already exists with ID: $SA_ID"
+              fi
+
+              # Create token
+              echo "Creating token for service account..."
+              TOKEN_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GRAFANA_URL/api/serviceaccounts/$SA_ID/tokens" \
+                -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"name\": \"$TOKEN_NAME\",
+                  \"secondsToLive\": $TOKEN_SECONDS_TO_LIVE
+                }")
+
+              HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -n1)
+              RESPONSE_BODY=$(echo "$TOKEN_RESPONSE" | head -n-1)
+
+              if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+                echo "ERROR: Failed to create token (HTTP $HTTP_CODE)"
+                echo "Response: $RESPONSE_BODY"
+                exit 1
+              fi
+
+              TOKEN=$(echo "$RESPONSE_BODY" | grep -o '"key":"[^"]*"' | cut -d'"' -f4)
+
+              if [ -z "$TOKEN" ]; then
+                echo "ERROR: Failed to extract token from response"
+                echo "Response: $RESPONSE_BODY"
+                exit 1
+              fi
+
+              echo "Token created successfully"
+
+              # Write token to shared volume for kubectl container
+              echo "$TOKEN" > /shared/token
+              echo "$GRAFANA_URL" > /shared/url
+              echo "$GRAFANA_ORG_ID" > /shared/orgId
+
+              echo "Service account provisioning complete!"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          resources:
+            {{- toYaml .Values.job.resources | nindent 12 }}
+
+      containers:
+        # Create Kubernetes Secret with the token
+        - name: create-secret
+          image: {{ .Values.job.kubectlImage.repository }}:{{ .Values.job.kubectlImage.tag }}
+          imagePullPolicy: {{ .Values.job.kubectlImage.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: SECRET_NAME
+              value: {{ .Values.secret.name | quote }}
+            - name: SECRET_NAMESPACE
+              value: {{ include "grafana-service-account.secretNamespace" . | quote }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+
+              # Read values from shared volume
+              TOKEN=$(cat /shared/token)
+              URL=$(cat /shared/url)
+              ORG_ID=$(cat /shared/orgId)
+
+              echo "Creating Kubernetes Secret '$SECRET_NAME' in namespace '$SECRET_NAMESPACE'..."
+
+              kubectl create secret generic "$SECRET_NAME" \
+                --namespace="$SECRET_NAMESPACE" \
+                --from-literal=token="$TOKEN" \
+                --from-literal=url="$URL" \
+                --from-literal=orgId="$ORG_ID" \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo "Secret created/updated successfully!"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          resources:
+            {{- toYaml .Values.job.resources | nindent 12 }}
+
+      volumes:
+        - name: shared
+          emptyDir: {}

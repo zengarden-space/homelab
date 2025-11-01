@@ -1,0 +1,10 @@
+repositories: []
+
+releases:
+  - name: grafana-alert-operator
+    namespace: monitoring
+    chart: ./grafana-alert-operator
+    version: 0.1.0
+    values:
+      - values.yaml
+    installed: true

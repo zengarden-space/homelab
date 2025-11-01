@@ -1,0 +1,12 @@
+apiVersion: v2
+name: grafana-service-account
+description: Provisions Grafana service account and token for Kubernetes operator
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - grafana
+  - service-account
+  - authentication
+maintainers:
+  - name: homelab

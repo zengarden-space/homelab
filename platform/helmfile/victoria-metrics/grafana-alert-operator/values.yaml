@@ -1,0 +1,39 @@
+# Default values for grafana-alert-operator
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  shellOperator: flant/shell-operator:latest
+  python: python:3.11-alpine
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 100m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+persistence:
+  enabled: true
+  size: 200Mi
+  storageClass: ""
+
+# Example Grafana instance configuration
+# This should be created separately in the cluster
+grafana:
+  # Example ConfigMap + Secret structure:
+  # apiVersion: v1
+  # kind: Secret
+  # metadata:
+  #   name: grafana-operator-token
+  #   namespace: monitoring
+  # stringData:
+  #   token: "glsa_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  #   url: "http://grafana.monitoring.svc.cluster.local:3000"
+  #   orgId: "1"
+  defaultSecretRef:
+    name: grafana-operator-token
+    namespace: monitoring
