@@ -24,10 +24,18 @@ spec:
     - namespace: secrets
       server: {{ .Values.application.destinationServer }}
 
-  # Cluster resource whitelist (namespace-scoped resources only)
+  # Cluster resource whitelist
   clusterResourceWhitelist:
     - group: ''
       kind: Namespace
+    # CRDs (for secret-editor and other apps with custom resources)
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    # Cluster RBAC (for apps requiring cluster-wide permissions)
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
 
   # Namespace resource whitelist (allow resources actually used by apps)
   namespaceResourceWhitelist:
@@ -110,6 +118,16 @@ spec:
     # Custom homelab CRDs
     - group: zengarden.space
       kind: DerivedSecret
+
+    # Secret Editor CRDs
+    - group: secreteditor.zengarden.space
+      kind: SecretAccessPolicy
+    - group: secreteditor.zengarden.space
+      kind: AccessGroup
+    - group: secreteditor.zengarden.space
+      kind: SecretAuditLog
+    - group: secreteditor.zengarden.space
+      kind: BreakGlassAccess
 
     # RBAC (for job watchers, etc.)
     - group: rbac.authorization.k8s.io

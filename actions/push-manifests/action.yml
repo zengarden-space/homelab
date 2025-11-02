@@ -9,6 +9,10 @@ inputs:
     description: 'Project name'
     required: false
     default: ''
+  component-type:
+    description: 'Component type (apps, system, or platform)'
+    required: false
+    default: 'apps'
   cluster:
     description: 'Cluster name'
     required: false
@@ -77,8 +81,8 @@ runs:
           fi
 
           # Copy manifest and add files
-          mkdir -p ./${{ inputs.cluster }}/${{ inputs.environment }}/$project_name
-          cp ../${{ inputs.manifest-file }} ./${{ inputs.cluster }}/${{ inputs.environment }}/$project_name/manifest.yaml
+          mkdir -p ./${{ inputs.cluster }}/${{ inputs.component-type }}/${{ inputs.environment }}/$project_name
+          cp ../${{ inputs.manifest-file }} ./${{ inputs.cluster }}/${{ inputs.component-type }}/${{ inputs.environment }}/$project_name/manifest.yaml
           git add .
 
           # Check if there are changes to commit
