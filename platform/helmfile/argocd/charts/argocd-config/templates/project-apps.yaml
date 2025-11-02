@@ -13,11 +13,11 @@ spec:
   # Allowed destinations
   destinations:
     # Application namespaces
-    - namespace: prod-*
+    - namespace: apps-prod-*
       server: {{ .Values.application.destinationServer }}
-    - namespace: dev-*
+    - namespace: apps-dev-*
       server: {{ .Values.application.destinationServer }}
-    - namespace: ci-*
+    - namespace: apps-ci-*
       server: {{ .Values.application.destinationServer }}
 
     # Secrets namespace (for DerivedSecret CRDs)

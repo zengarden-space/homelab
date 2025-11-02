@@ -132,7 +132,7 @@ jobs:
           echo "Using tag: $IMAGE_TAG"
           chart_path="./helm/$repo_name"
           helm template $repo_name "$chart_path" \
-            --namespace dev-$repo_name \
+            --namespace ${{ inputs.component-type }}-dev-$repo_name \
             --values ./helm/values-dev.yaml \
             --set image.tag=$IMAGE_TAG > manifest-dev.yaml
 
@@ -144,7 +144,7 @@ jobs:
           echo "Using tag: $IMAGE_TAG"
           chart_path="./helm/$repo_name"
           helm template $repo_name "$chart_path" \
-            --namespace prod-$repo_name \
+            --namespace ${{ inputs.component-type }}-prod-$repo_name \
             --values ./helm/values-prod.yaml \
             --set image.tag=$IMAGE_TAG > manifest-prod.yaml
 

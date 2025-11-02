@@ -1,30 +1,41 @@
 name: Cleanup CI Environment
-description: Delete CI environment manifest directory (file operations only, no git commit/push)
+description: Remove CI environment directory from manifests repository after PR is closed
 
 inputs:
   slug:
-    description: 'Environment slug (e.g., branch name) - will be hashed to find environment ID'
+    description: 'Environment slug (e.g., branch name) - will be hashed to create ENV_ID'
     required: true
   project-name:
     description: 'Project name'
     required: false
     default: ''
+  component-type:
+    description: 'Component type (apps, system, or platform)'
+    required: false
+    default: 'apps'
   cluster:
     description: 'Cluster name'
     required: false
     default: 'homelab'
-  manifests-repo-path:
-    description: 'Path to checked-out manifests repository'
+  manifests-repo:
+    description: 'Manifests repository (owner/repo)'
     required: false
-    default: 'manifests-repo'
+    default: 'zengarden-space/manifests'
+  token:
+    description: 'GitHub/Gitea token with write access to manifests repo'
+    required: true
+  pr-number:
+    description: 'Pull request number for commit message'
+    required: false
+    default: ''
 
 outputs:
   environment-id:
     description: 'Environment identifier (sha256 hash of slug)'
     value: ${{ steps.env.outputs.id }}
-  deleted:
-    description: 'Whether files were deleted (true/false)'
-    value: ${{ steps.cleanup.outputs.deleted }}
+  directory-removed:
+    description: 'Whether the directory was found and removed (true/false)'
+    value: ${{ steps.cleanup.outputs.removed }}
 
 runs:
   using: composite
@@ -51,31 +62,45 @@ runs:
         echo "Slug: $slug"
         echo "Environment ID: $env_id"
 
-    - name: Delete CI environment directory
+    - name: Checkout manifests repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.manifests-repo }}
+        ref: 'main'
+        path: manifests-repo
+        token: ${{ inputs.token }}
+        fetch-depth: 0
+
+    - name: Remove CI environment directory
       id: cleanup
       shell: bash
       run: |
+        cd manifests-repo
         project_name="${{ steps.project.outputs.name }}"
         env_id="${{ steps.env.outputs.id }}"
+        env_dir="${{ inputs.cluster }}/${{ inputs.component-type }}/ci-${env_id}/${project_name}"
 
-        ci_dir="${{ inputs.manifests-repo-path }}/${{ inputs.cluster }}/ci-${env_id}/${project_name}"
+        echo "Looking for directory: $env_dir"
 
-        if [ ! -d "$ci_dir" ]; then
-          echo "CI environment directory does not exist: $ci_dir"
-          echo "Nothing to cleanup"
-          echo "deleted=false" >> $GITHUB_OUTPUT
-          exit 0
+        if [ -d "$env_dir" ]; then
+          git rm -rf "$env_dir"
+          git config user.name "Gitea Actions Bot"
+          git config user.email "gitea-actions[bot]@users.noreply.zengarden.space"
+
+          # Build commit message
+          if [ -n "${{ inputs.pr-number }}" ]; then
+            commit_msg="Cleanup CI environment ci-${env_id} after PR #${{ inputs.pr-number }} closed"
+          else
+            commit_msg="Cleanup CI environment ci-${env_id} for $project_name"
+          fi
+
+          git commit -m "$commit_msg"
+          git push
+
+          echo "removed=true" >> $GITHUB_OUTPUT
+          echo "Successfully removed environment directory: $env_dir"
+        else
+          echo "removed=false" >> $GITHUB_OUTPUT
+          echo "Environment directory not found: $env_dir"
+          echo "Note: This is expected if the environment was already cleaned up or never created"
         fi
-
-        echo "Deleting CI environment directory: $ci_dir"
-        rm -rf "$ci_dir"
-
-        # Check if parent directory is empty and remove if so
-        parent_dir="${{ inputs.manifests-repo-path }}/${{ inputs.cluster }}/ci-${env_id}"
-        if [ -d "$parent_dir" ] && [ -z "$(ls -A $parent_dir)" ]; then
-          echo "Parent directory is empty, removing: $parent_dir"
-          rm -rf "$parent_dir"
-        fi
-
-        echo "Successfully deleted CI environment directory"
-        echo "deleted=true" >> $GITHUB_OUTPUT
