@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Core platform components (ArgoCD, GitOps, platform operators)
+
+  # Source repositories
+  sourceRepos:
+    - {{ .Values.application.git.repoURL }}
+
+  # Allowed destinations - platform components typically run in specific namespaces
+  destinations:
+    - namespace: platform-dev-*
+      server: {{ .Values.application.destinationServer }}
+    - namespace: platform-prod-*
+      server: {{ .Values.application.destinationServer }}
+    - namespace: platform-ci-*
+      server: {{ .Values.application.destinationServer }}
+
+  # Cluster resource whitelist - platform needs full cluster access
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Namespace resource whitelist - platform needs full namespace access
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Orphaned resources monitoring
+  orphanedResources:
+    warn: true

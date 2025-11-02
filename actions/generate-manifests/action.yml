@@ -9,6 +9,10 @@ inputs:
     description: 'Project name'
     required: false
     default: ''
+  component-type:
+    description: 'Component type (apps, system, or platform)'
+    required: false
+    default: 'apps'
   image-tag:
     description: 'Docker image tag'
     required: true
@@ -24,6 +28,9 @@ outputs:
   project-name:
     description: 'Resolved project name'
     value: ${{ steps.project.outputs.name }}
+  component-type:
+    description: 'Component type (apps, system, or platform)'
+    value: ${{ inputs.component-type }}
 
 runs:
   using: composite
@@ -77,7 +84,7 @@ runs:
         echo "Image tag: ${{ inputs.image-tag }}"
 
         helm template "$project_name" "$chart_path" \
-          --namespace ${{ inputs.environment }}-$project_name \
+          --namespace ${{ inputs.component-type }}-${{ inputs.environment }}-$project_name \
           --values "$values_file" \
           --set image.tag=${{ inputs.image-tag }} \
           > "$manifest_file"

@@ -1,0 +1,148 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: system
+  namespace: argocd
+spec:
+  description: System-level infrastructure services (monitoring, ingress, DNS, etc.)
+
+  # Source repositories
+  sourceRepos:
+    - {{ .Values.application.git.repoURL }}
+
+  # Allowed destinations
+  destinations:
+    # System applications
+    - namespace: system-dev-*
+      server: {{ .Values.application.destinationServer }}
+    - namespace: system-prod-*
+      server: {{ .Values.application.destinationServer }}
+    - namespace: system-ci-*
+      server: {{ .Values.application.destinationServer }}
+
+  # Cluster resource whitelist - system services need more cluster-level access
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+
+  # Namespace resource whitelist
+  namespaceResourceWhitelist:
+    # Core resources
+    - group: ''
+      kind: Pod
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: Secret
+    - group: ''
+      kind: ServiceAccount
+    - group: ''
+      kind: PersistentVolumeClaim
+
+    # Workload resources
+    - group: apps
+      kind: ReplicaSet
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: apps
+      kind: DaemonSet
+    - group: batch
+      kind: Job
+    - group: batch
+      kind: CronJob
+
+    # Networking
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+
+    # Autoscaling and policies
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+
+    # Victoria Metrics
+    - group: operator.victoriametrics.com
+      kind: VMAgent
+    - group: operator.victoriametrics.com
+      kind: VMSingle
+    - group: operator.victoriametrics.com
+      kind: VMCluster
+    - group: operator.victoriametrics.com
+      kind: VMAlert
+    - group: operator.victoriametrics.com
+      kind: VMAlertmanager
+    - group: operator.victoriametrics.com
+      kind: VMServiceScrape
+    - group: operator.victoriametrics.com
+      kind: VMPodScrape
+    - group: operator.victoriametrics.com
+      kind: VMRule
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+
+    # External Secrets Operator
+    - group: external-secrets.io
+      kind: ExternalSecret
+    - group: external-secrets.io
+      kind: SecretStore
+    - group: external-secrets.io
+      kind: ClusterSecretStore
+
+    # Cert-manager
+    - group: cert-manager.io
+      kind: Certificate
+    - group: cert-manager.io
+      kind: CertificateRequest
+    - group: cert-manager.io
+      kind: Issuer
+    - group: cert-manager.io
+      kind: ClusterIssuer
+
+    # RBAC
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+
+    # Custom homelab CRDs
+    - group: zengarden.space
+      kind: DerivedSecret
+    - group: networking.zengarden.space
+      kind: CompositeIngressHost
+    - group: networking.zengarden.space
+      kind: PartialIngress
+
+    # Secret Editor CRDs
+    - group: secreteditor.zengarden.space
+      kind: SecretAccessPolicy
+    - group: secreteditor.zengarden.space
+      kind: AccessGroup
+    - group: secreteditor.zengarden.space
+      kind: SecretAuditLog
+    - group: secreteditor.zengarden.space
+      kind: BreakGlassAccess
+
+  # Orphaned resources monitoring
+  orphanedResources:
+    warn: true
