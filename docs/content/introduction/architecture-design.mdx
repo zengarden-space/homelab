@@ -186,29 +186,51 @@ Platform services provide core capabilities required by all applications.
 │  │  - Build container images                  │             │
 │  │  - Run tests                               │             │
 │  │  - Push to Gitea registry                  │             │
-│  │  - Update manifests/ repo                  │             │
+│  │  - Render Helm charts                      │             │
+│  │  - Push manifests to homelab/{type}/{env}/ │             │
 │  └──────────────────┬─────────────────────────┘             │
 │                     │                                       │
-│                     │ (Git Commit to manifests/)            │
+│                     │ (Git Commit to manifests/homelab/)    │
 │                     ▼                                       │
 │  ┌────────────────────────────────────────────┐             │
-│  │  ArgoCD (GitOps Controller)                │             │
-│  │  - Watches manifests/ repository           │             │
-│  │  - Auto-discovers applications             │             │
-│  │  - Syncs to cluster                        │             │
-│  │  - Self-heal on drift                      │             │
+│  │  ArgoCD ApplicationSet Controller          │             │
+│  │  - Watches manifests/homelab/*/*/*         │             │
+│  │  - Auto-discovers applications by path     │             │
+│  │  - Creates Application per directory       │             │
+│  │  - Routes to correct AppProject            │             │
 │  └──────────────────┬─────────────────────────┘             │
 │                     │                                       │
 │                     │ (kubectl apply)                       │
 │                     ▼                                       │
 │  ┌────────────────────────────────────────────┐             │
 │  │      Kubernetes Cluster                    │             │
+│  │  - Namespace: {type}-{env}-{projectname}   │             │
 │  │  - Deploys applications                    │             │
 │  │  - Creates services                        │             │
 │  │  - Provisions ingress                      │             │
 │  └────────────────────────────────────────────┘             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Manifest Organization:**
+```
+manifests/homelab/
+├── apps/           # AppProject: apps (application workloads)
+│   ├── dev/        # Namespace prefix: apps-dev-*
+│   ├── prod/       # Namespace prefix: apps-prod-*
+│   └── ci-*/       # Namespace prefix: apps-ci-*-*
+├── system/         # AppProject: system (infrastructure services)
+│   ├── dev/        # Namespace prefix: system-dev-*
+│   └── prod/       # Namespace prefix: system-prod-*
+└── platform/       # AppProject: platform (core platform)
+    └── prod/       # Namespace prefix: platform-prod-*
+```
+
+**ApplicationSet Pattern:**
+- Single unified ApplicationSet watches `homelab/*/*/*` pattern
+- Auto-generates Applications: `homelab.{type}.{env}.{projectname}`
+- Dynamically assigns AppProject based on directory structure
+- Namespace: `{type}-{env}-{projectname}`
 
 **Custom Operators:**
 

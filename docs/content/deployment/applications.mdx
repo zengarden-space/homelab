@@ -17,14 +17,40 @@ This guide explains how to deploy applications using the GitOps workflow: GitHub
        ↓
 4. Gitea Actions: build Docker image, push to Gitea registry
        ↓
-5. Gitea Actions: update manifests repository with new image tag
+5. Gitea Actions: render Helm chart, push manifest to manifests repo
        ↓
-6. ArgoCD watches manifests repository, detects change
+6. ArgoCD ApplicationSet auto-discovers new application
        ↓
 7. ArgoCD syncs application to Kubernetes cluster
        ↓
-8. Application running in Kubernetes
+8. Application running in Kubernetes (namespace: {component-type}-{env}-{projectname})
 ```
+
+### Component Types & Organization
+
+Applications are organized into three **component types**, each mapping to an ArgoCD AppProject:
+
+| Component Type | AppProject | Purpose | Example Namespaces |
+|----------------|------------|---------|-------------------|
+| **apps** | apps | Application workloads (default) | `apps-dev-retroboard`, `apps-prod-api` |
+| **system** | system | System infrastructure services | `system-dev-secret-editor`, `system-prod-monitoring` |
+| **platform** | platform | Core platform components | `platform-prod-argocd-extensions` |
+
+**Directory structure in manifests repository:**
+```
+manifests/homelab/
+├── apps/{env}/{projectname}/       # Application workloads
+├── system/{env}/{projectname}/     # System services
+└── platform/{env}/{projectname}/   # Platform components
+```
+
+**Namespace naming:** `{component-type}-{env}-{projectname}`
+- Examples: `apps-dev-myapp`, `system-prod-monitoring`, `apps-ci-abc123de-myapp`
+
+**When to use each type:**
+- **apps (default)**: Regular application workloads, APIs, frontends, backends
+- **system**: Infrastructure tooling like secret editors, monitoring dashboards
+- **platform**: Extensions to core platform (ArgoCD plugins, operators)
 
 ## Prerequisites
 
