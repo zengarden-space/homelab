@@ -48,27 +48,64 @@ This homelab serves multiple purposes:
 
 ```
 homelab/
-├── ansible/                       # Day 1: Infrastructure bootstrap
-│   ├── install-k3s/               # K3s cluster installation + hardening
-│   ├── install-restrictive-proxy/ # MikroTik API proxy with path restrictions
-│   ├── partition-nvme-drives/     # NVMe partitioning for local-path
-│   └── setup-ssh-keys/            # SSH key distribution
-├── helmfile/                      # Day 1: Platform deployment
-│   ├── helmfile.yaml              # Root orchestration
-│   ├── metallb-system/            # Load balancer IP ranges
-│   ├── cert-manager/              # TLS certificate management
-│   ├── external-dns/              # DNS automation (MikroTik + Cloudflare)
-│   ├── external-tunnel/           # Cloudflare Tunnel + external ingress
-│   ├── ingress-nginx/             # Internal ingress controller
-│   ├── partial-ingress/           # PartialIngress operator for PR environments
-│   ├── secrets-system/            # External Secrets + DerivedSecrets operator
-│   ├── argocd/                    # GitOps controller + config
-│   ├── gitea/                     # Git server + automation + runner
-│   ├── cnpg-system/               # CloudNativePG operator
-│   ├── metabase/                  # Analytics + CNPG auto-discovery operator
-│   └── victoria-metrics/          # Monitoring stack + Grafana Alert Operator
-├── integrations.yaml.template     # External service credentials
-└── docs/                          # This documentation site
+├── .github/                       # Repository metadata and automation hooks
+│   ├── template-workflows/        # Shared workflow definitions consumed by multiple repos
+│   └── workflows/                 # Active CI pipelines for linting, docs, and release guardrails
+├── actions/                       # Gitea/GitHub composite actions for CI/CD + GitOps
+│   ├── add-composite-ingress-host/ # Generate ingress host records for composite environments
+│   ├── add-partial-ingress/       # PR helper to wire PartialIngress resources into CI namespaces
+│   ├── cleanup-ci-environment/    # Tear down ephemeral namespaces and workloads automatically
+│   ├── commit-manifests/          # Commit rendered manifests back into the manifests repo
+│   ├── generate-ci-manifests/     # Render manifests tailored to CI namespaces and inputs
+│   ├── generate-manifests/        # Generic helmfile/helm renderer used by multiple pipelines
+│   ├── push-manifests/            # Push rendered artifacts to the manifests repository mirror
+│   └── review-manifests/          # Create review summaries and status checks for generated YAML
+├── app/
+│   └── helm/                      # Example application Helm charts & manifests
+│       └── example-microservice/  # Reference microservice chart illustrating best practices
+├── designs/                       # Architecture decision records and deep dives
+├── docs/                          # Next.js documentation site (app router + MDX content)
+│   ├── app/                       # UI routes, layout, and page components
+│   │   └── [[...mdxPath]]/        # Dynamic route that maps markdown slugs to rendered pages
+│   ├── components/                # Shared UI components
+│   ├── content/                   # Source MDX for documentation sections
+│   │   ├── deployment/            # Day 1 guides (infrastructure, core platform, applications)
+│   │   ├── images/                # Embedded diagrams referenced across the docs
+│   │   ├── introduction/          # Conceptual deep dives and design rationale
+│   │   └── operations/            # Runbooks, monitoring, RBAC, and maintenance content
+│   ├── drawio/                    # Editable diagrams and architecture visuals
+│   ├── helm/
+│   │   └── docs/                  # Helm chart powering the docs site deployment
+│   └── public/                    # Static assets served by Next.js
+│       └── images/                # Generated PNG/SVG assets produced from draw.io sources
+├── platform/
+│   └── helmfile/                  # Day 1 platform services (ArgoCD, Gitea, observability stack)
+│       ├── argocd/                # GitOps controller configuration and Dex/OIDC wiring
+│       ├── cnpg-system/           # CloudNativePG operator for PostgreSQL automation
+│       ├── gitea/                 # Internal Git service plus actions runner bootstrap
+│       ├── metabase/              # Analytics stack with CNPG auto-discovery operator
+│       ├── partial-ingress/       # Custom operator enabling partial environment deployments
+│       └── victoria-metrics/      # Metrics, Grafana, alerting, and notification stack
+├── system/
+│   ├── ansible/                   # Day 0 automation (bootstrap, hardening, maintenance)
+│   │   ├── apt-update/            # Automated unattended-apt configuration for CM5 nodes
+│   │   ├── fix-flash-kernel/      # Ensures Pi blades boot reliably after kernel updates
+│   │   ├── install-k3s/           # Secure K3s installation with Cilium, audit logs, and OIDC
+│   │   ├── install-restrictive-proxy/ # MikroTik HTTP proxy with tight path whitelisting
+│   │   ├── install-security-audit/ # Deploys daily CIS-style audit scripts to every node
+│   │   ├── partition-nvme-drives/  # Declarative NVMe partitioning for etcd and local-path
+│   │   └── setup-ssh-keys/        # Distributes management SSH keys across the fleet
+│   └── helmfile/                  # Core infrastructure (networking, ingress, security, RBAC)
+│       ├── cert-manager/          # ACME issuers, internal CA, certificate policies
+│       ├── external-dns/          # DNS automation against MikroTik and Cloudflare providers
+│       ├── external-tunnel/       # Cloudflare Tunnel exposure for external ingress endpoints
+│       ├── ingress-nginx/         # Internal ingress controller with ModSecurity and WAF
+│       ├── metallb-system/        # Layer-2 load balancer IP pool configuration
+│       ├── rbac-system/           # Unified RBAC operator, User CRDs, and policy sync
+│       └── secrets-system/        # External Secrets + DerivedSecrets operators and master secret
+├── integrations.yaml.template     # External integration secrets template
+├── users.yaml.template            # Sample RBAC user catalog
+└── README.md                      # Project overview and quick start
 ```
 
 ## Getting Started
