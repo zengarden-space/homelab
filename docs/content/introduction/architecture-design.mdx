@@ -29,7 +29,7 @@ This homelab implements a **multi-layered, security-hardened architecture** desi
 │  Firewall Rules │ Network Routing │ DNS │ DHCP │ WireGuard     │
 ├────────────┬────────────────┬──────────────────┬───────────────┤
 │  Cluster   │    Home        │   Management     │  WireGuard VPN│
-│  Network   │    Network     │   Network        │  10.8.0.0/24  │
+│  Network   │    Network     │   Network        │ 192.168.216.0/24 │
 │  eth2+eth3 │    eth4        │    eth5          │               │
 └─────┬──────┴────────────────┴──────────────────┴───────────────┘
       │
@@ -48,7 +48,7 @@ This homelab implements a **multi-layered, security-hardened architecture** desi
 | **Cluster** | 192.168.77.0/24 | K3s cluster nodes | Internet access, isolated from home network, limited inbound access |
 | **Home** | 192.168.88.0/24 | Home devices (WiFi, laptops) | Internet access, limited cluster service access via MetalLB |
 | **Management** | 192.168.100.0/24 | Management workstation | Full access to all networks, no inbound access allowed |
-| **WireGuard** | 10.8.0.0/24 | VPN clients | Access to cluster + pod/service networks, blocked from home/mgmt |
+| **WireGuard** | 192.168.216.0/24 | VPN clients | Access to cluster + pod/service networks, blocked from home/mgmt |
 
 **Firewall Strategy:**
 - Default deny-all with explicit allow rules

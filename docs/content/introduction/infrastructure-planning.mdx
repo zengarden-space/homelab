@@ -125,7 +125,7 @@ This section provides comprehensive infrastructure planning details, including h
 ├────────────┬──────────────┬──────────────┬──────────────────┤
 │ Cluster    │  Home        │  Management  │  WireGuard VPN   │
 │ Network    │  Network     │  Network     │  (Remote)        │
-│ .77.0/24   │  .88.0/24    │  .100.0/24   │  10.8.0.0/24     │
+│ .77.0/24   │  .88.0/24    │  .100.0/24   │ .216.0/24        │
 └─────┬──────┴──────────────┴──────────────┴──────────────────┘
       │
       ├─── Zyxel PoE Switch ───┬─── blade001 (.77.11)
@@ -143,7 +143,7 @@ This section provides comprehensive infrastructure planning details, including h
 | **Cluster** | 192.168.77.0/24 | .77.1 | .77.1 | K3s cluster nodes | Allow internet, limited inbound from home network (80/443 only) |
 | **Home** | 192.168.88.0/24 | .88.1 | .88.1 | Home devices | Allow internet, allow cluster:80/443 (web services) |
 | **Management** | 192.168.100.0/24 | .100.1 | .100.1 | Admin workstation | Full access (all networks + internet), no inbound |
-| **WireGuard** | 10.8.0.0/24 | .77.15 | .77.1 | VPN clients | Access cluster + pod/service networks, blocked from home/mgmt |
+| **WireGuard** | 192.168.216.0/24 | .77.15 | .77.1 | VPN clients | Access cluster + pod/service networks, blocked from home/mgmt |
 
 ### Power Budget
 
