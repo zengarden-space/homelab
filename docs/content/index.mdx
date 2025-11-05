@@ -64,20 +64,7 @@ homelab/
 │   └── helm/                      # Example application Helm charts & manifests
 │       └── example-microservice/  # Reference microservice chart illustrating best practices
 ├── designs/                       # Architecture decision records and deep dives
-├── docs/                          # Next.js documentation site (app router + MDX content)
-│   ├── app/                       # UI routes, layout, and page components
-│   │   └── [[...mdxPath]]/        # Dynamic route that maps markdown slugs to rendered pages
-│   ├── components/                # Shared UI components
-│   ├── content/                   # Source MDX for documentation sections
-│   │   ├── deployment/            # Day 1 guides (infrastructure, core platform, applications)
-│   │   ├── images/                # Embedded diagrams referenced across the docs
-│   │   ├── introduction/          # Conceptual deep dives and design rationale
-│   │   └── operations/            # Runbooks, monitoring, RBAC, and maintenance content
-│   ├── drawio/                    # Editable diagrams and architecture visuals
-│   ├── helm/
-│   │   └── docs/                  # Helm chart powering the docs site deployment
-│   └── public/                    # Static assets served by Next.js
-│       └── images/                # Generated PNG/SVG assets produced from draw.io sources
+├── docs/                          # Next.js documentation site (this site)
 ├── platform/
 │   └── helmfile/                  # Day 1 platform services (ArgoCD, Gitea, observability stack)
 │       ├── argocd/                # GitOps controller configuration and Dex/OIDC wiring
