@@ -92,11 +92,11 @@ This section provides comprehensive infrastructure planning details, including h
 - LTE failover (built-in modem for internet redundancy)
 
 #### Zyxel PoE Switch
-**Model:** 8-port Gigabit PoE+ switch
+**Model:** 5-port Gigabit PoE+ switch
 
 | Feature | Specification |
 |---------|---------------|
-| **Ports** | 8× Gigabit PoE+ |
+| **Ports** | 5× Gigabit PoE+ |
 | **PoE Budget** | 60W total |
 | **Usage** | Powers CM5 blades |
 | **Power** | ~3W (idle) + PoE consumption |
@@ -297,7 +297,7 @@ kube-apiserver-arg:
 | **NVMe SSDs (final)** | 5 | ~$25 | $125 | Budget M.2 2242 drives |
 | **NVMe SSDs (initial, abandoned)** | 2 | ~$80 | $160 | Samsung 990 PRO (too hot) |
 | **MikroTik Chateau LTE18 ax** | 1 | ~$200 | $200 | Router + firewall + LTE |
-| **Zyxel PoE Switch** | 1 | ~$200 | $200 | 8-port PoE+ |
+| **Zyxel PoE Switch** | 1 | ~$200 | $200 | 5-port PoE+ |
 | **Cables, Power** | Various | | $100 | Ethernet cables, power supplies |
 | **Total Initial** | | | **$1,385** | One-time cost |
 
