@@ -1,0 +1,56 @@
+environments:
+  default:
+    values:
+      - env.yaml
+---
+helmDefaults:
+  wait: true
+  timeout: 600
+
+releases:
+  - name: kagent-crds
+    namespace: kagent
+    chart: oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds
+    version: 0.7.4
+
+  - name: kagent
+    namespace: kagent
+    chart: oci://ghcr.io/kagent-dev/kagent/helm/kagent
+    version: 0.7.4
+    needs:
+      - kagent-crds
+    values:
+      - providers:
+          default: ollama
+          ollama:
+            model: "llama3.1:8b"
+            config:
+              host: http://192.168.88.15:11434
+        grafana-mcp:
+          grafana:
+            url: "grafana.kagent:3000/api"
+        tools:
+          querydoc:
+            enabled: false
+
+  - name: kagent-config
+    namespace: kagent
+    chart: ./charts/kagent-config
+    values:
+      - ingress:
+          enabled: true
+          className: internal
+          hosts:
+            - host: kagent.homelab.int.{{ .Values.domain }}
+              paths:
+                - path: /
+                  pathType: Prefix
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          tls:
+            - secretName: kagent-tls
+              hosts:
+                - kagent.homelab.int.{{ .Values.domain }}
+        service:
+          name: kagent-ui
+          port: 8080

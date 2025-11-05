@@ -13,9 +13,10 @@ helmfiles:
 
   # DB
   - path: cnpg-system/helmfile.yaml.gotmpl
-
-  # Analytics
   - path: metabase/helmfile.yaml.gotmpl
+
+  # AI
+  - path: kagent/helmfile.yaml.gotmpl
 
   # Networking
   - path: partial-ingress/helmfile.yaml.gotmpl
