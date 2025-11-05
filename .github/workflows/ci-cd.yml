@@ -91,69 +91,22 @@ jobs:
       - name: Lint Helm chart
         run: helm lint ./docs/helm/docs
 
-      - name: Update Helm values
-        run: |
-          echo "Using tag: $IMAGE_TAG"
-          helm template docs ./docs/helm/docs \
-            --namespace docs \
-            --values ./docs/helm/values-prod.yaml \
-            --set image.tag=$IMAGE_TAG > manifest.yaml
-
-      - name: Checkout manifests repo
-        uses: actions/checkout@v4
+      - name: Generate manifests
+        uses: ./actions/generate-manifests
+        id: generate
         with:
-          repository: zengarden-space/manifests
-          ref: main
-          path: manifests
+          environment: prod
+          project-name: docs
+          component-type: platform
+          image-tag: ${{ env.IMAGE_TAG }}
+          cluster: homelab
+
+      - name: Push manifests
+        uses: ./actions/push-manifests
+        with:
+          environment: prod
+          project-name: docs
+          component-type: platform
+          cluster: homelab
+          manifest-file: ${{ steps.generate.outputs.manifest-file }}
           token: ${{ secrets.CONTENT_WRITE_TOKEN }}
-
-      - name: Push changes to manifests
-        run: |
-          cd manifests
-          git config --local user.name "Gitea Actions Bot"
-          git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
-
-          # Retry loop for git operations
-          for attempt in {1..5}; do
-            echo "Attempt $attempt of 5"
-
-            # Pull latest changes
-            if ! git pull origin main; then
-              echo "Failed to pull on attempt $attempt"
-              continue
-            fi
-
-            # Copy manifest and add files
-            mkdir -p ./homelab/prod/homelab-docs
-            cp ../manifest.yaml ./homelab/prod/homelab-docs/manifest.yaml
-            git add .
-
-            # Check if there are changes to commit
-            if git diff --cached --quiet; then
-              echo "No changes to commit"
-              break
-            fi
-
-            # Commit changes
-            if ! git commit -m "homelab-docs: ${{ github.event.head_commit.message }} ${{github.sha}}"; then
-              echo "Failed to commit on attempt $attempt"
-              git reset --hard HEAD
-              continue
-            fi
-
-            # Try to push
-            if git push origin main; then
-              echo "Successfully pushed on attempt $attempt"
-              break
-            else
-              echo "Failed to push on attempt $attempt, discarding commit"
-              git reset --hard HEAD~1
-
-              if [ $attempt -eq 5 ]; then
-                echo "Failed to push after 5 attempts"
-                exit 1
-              fi
-
-              sleep $((attempt * 2))  # Exponential backoff
-            fi
-          done
