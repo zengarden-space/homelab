@@ -91,15 +91,13 @@ jobs:
       - name: Lint Helm chart
         run: helm lint ./docs/helm/docs
 
-      - name: Generate manifests
-        uses: ./actions/generate-manifests
-        id: generate
-        with:
-          environment: prod
-          project-name: docs
-          component-type: platform
-          image-tag: ${{ env.IMAGE_TAG }}
-          cluster: homelab
+      - name: Generate manifest
+        run: |
+          echo "Using tag: $IMAGE_TAG"
+          helm template docs ./docs/helm/docs \
+            --namespace platform-prod-docs \
+            --values ./docs/helm/values-prod.yaml \
+            --set image.tag=$IMAGE_TAG > manifest-prod.yaml
 
       - name: Push manifests
         uses: ./actions/push-manifests
@@ -108,5 +106,5 @@ jobs:
           project-name: docs
           component-type: platform
           cluster: homelab
-          manifest-file: ${{ steps.generate.outputs.manifest-file }}
+          manifest-file: manifest-prod.yaml
           token: ${{ secrets.CONTENT_WRITE_TOKEN }}
