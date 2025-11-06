@@ -6,6 +6,14 @@ inputs:
     description: 'Project name'
     required: false
     default: ''
+  component-type:
+    description: 'Component type (apps, system, or platform)'
+    required: false
+    default: 'apps'
+  environment:
+    description: 'Environment (dev, prod, etc.)'
+    required: false
+    default: 'dev'
   base-host:
     description: 'Base hostname for dev environment (e.g., "retroboard.dev.homelab.int.zengarden.space")'
     required: true
@@ -50,6 +58,8 @@ runs:
 
         echo "Creating CompositeIngressHost manifest"
         echo "Project: $project_name"
+        echo "Component type: ${{ inputs.component-type }}"
+        echo "Environment: ${{ inputs.environment }}"
         echo "Base host: ${{ inputs.base-host }}"
         echo "Host pattern: ${{ inputs.host-pattern }}"
         echo "Ingress class: ${{ inputs.ingress-class }}"
@@ -61,7 +71,7 @@ runs:
         kind: CompositeIngressHost
         metadata:
           name: ${project_name}-composite
-          namespace: dev-${project_name}
+          namespace: ${{ inputs.component-type }}-${{ inputs.environment }}-${project_name}
         spec:
           baseHost: "${{ inputs.base-host }}"
           hostPattern: "${{ inputs.host-pattern }}"
