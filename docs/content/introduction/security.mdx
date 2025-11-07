@@ -503,11 +503,31 @@ RestrictNamespaces=true
 
 ### DerivedSecrets Operator
 
+**Implementation**: [OSS Derived Secret Operator](https://github.com/oleksiyp/derived-secret-operator) - Go-based Kubernetes operator
+
 **Security Benefits:**
 - **Single master secret**: Reduces secret sprawl
 - **Deterministic derivation**: Same input → same output (reproducible)
 - **Argon2id KDF**: OWASP-recommended, resistant to GPU cracking
 - **Namespace isolation**: Each secret derived with unique context
+- **Multi-arch support**: amd64/arm64 (signed images with SBOM)
+
+**Example Usage:**
+```yaml
+apiVersion: secrets.oleksiyp.dev/v1alpha1
+kind: DerivedSecret
+metadata:
+  name: app-secrets
+  namespace: production
+spec:
+  keys:
+    DATABASE_PASSWORD:
+      type: password        # 26 chars, 128-bit entropy
+      masterPassword: default
+    ENCRYPTION_KEY:
+      type: encryption-key  # 48 chars, 256-bit entropy
+      masterPassword: default
+```
 
 **Argon2 Parameters:**
 ```bash

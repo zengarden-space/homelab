@@ -62,7 +62,18 @@ releases:
 
   - name: derived-secret-operator
     namespace: secrets-system
-    chart: ./derived-secret-operator
+    chart: oci://ghcr.io/oleksiyp/charts/derived-secret-operator
+    version: 0.1.5
+
     values:
-      - masterPassword:
-          value: {{ .Values.derivedSecrets.masterPassword | quote }}
+      - defaultMasterPassword:
+          enabled: false
+        installCRDs: true
+
+  - name: master-password
+    namespace: secrets-system
+    needs:
+      - derived-secret-operator
+    chart: ./master-password
+    values:
+      - masterPassword: {{ .Values.derivedSecrets.masterPassword | quote }}

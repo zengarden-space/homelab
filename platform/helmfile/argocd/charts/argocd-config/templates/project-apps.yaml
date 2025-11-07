@@ -119,6 +119,12 @@ spec:
     - group: zengarden.space
       kind: DerivedSecret
 
+    # OSS Derived Secret Operator CRDs
+    - group: secrets.oleksiyp.dev
+      kind: DerivedSecret
+    - group: secrets.oleksiyp.dev
+      kind: MasterPassword
+
     # Secret Editor CRDs
     - group: secreteditor.zengarden.space
       kind: SecretAccessPolicy

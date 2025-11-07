@@ -1,0 +1,5 @@
+apiVersion: v2
+name: master-password
+description: Master password secret for derived-secret-operator
+type: application
+version: 0.1.0
