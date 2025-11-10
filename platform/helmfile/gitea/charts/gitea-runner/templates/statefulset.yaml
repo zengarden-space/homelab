@@ -5,7 +5,7 @@ metadata:
     app: gitea-action-runner
   name: gitea-action-runner
 spec:
-  replicas: {{ .Values.runner.replicas | default 4 }}
+  replicas: {{ .Values.runner.replicas }}
   serviceName: gitea-action-runner
   selector:
     matchLabels:
