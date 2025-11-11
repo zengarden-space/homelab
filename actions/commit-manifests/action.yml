@@ -39,8 +39,11 @@ runs:
             exit 0
           fi
 
-          # Commit changes
-          if ! git commit -m "${{ inputs.commit-message }}"; then
+          # Commit changes using heredoc to avoid "File name too long" errors
+          if ! git commit -F - <<'COMMIT_MSG_EOF'
+${{ inputs.commit-message }}
+COMMIT_MSG_EOF
+          then
             echo "Failed to commit on attempt $attempt"
             git reset --hard HEAD
             continue
