@@ -141,6 +141,12 @@ spec:
     - group: rbac.authorization.k8s.io
       kind: RoleBinding
 
+    # cert-manager
+    - group: cert-manager.io
+      kind: Certificate
+    - group: cert-manager.io
+      kind: Issuer
+
   # Sync windows (optional - can restrict when syncs happen)
   # syncWindows: []
 
