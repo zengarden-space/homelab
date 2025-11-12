@@ -63,11 +63,17 @@ runs:
         git config --local user.name "Gitea Actions Bot"
         git config --local user.email "gitea-actions[bot]@users.noreply.zengarden.space"
 
-        # Determine commit message
+        # Determine commit message using heredoc to avoid quoting issues
         if [ -n "${{ inputs.commit-message }}" ]; then
-          commit_msg="${{ inputs.commit-message }}"
+          commit_msg=$(cat <<'EOF'
+        ${{ inputs.commit-message }}
+        EOF
+        )
         else
-          commit_msg="${{ github.repository }}: ${{ github.event.head_commit.message }} ${{ github.sha }}"
+          commit_msg=$(cat <<'EOF'
+        ${{ github.repository }}: ${{ github.event.head_commit.message }} ${{ github.sha }}
+        EOF
+        )
         fi
 
         # Retry loop for git operations
@@ -91,8 +97,11 @@ runs:
             break
           fi
 
-          # Commit changes
-          if ! git commit -m "$commit_msg"; then
+          # Commit changes using heredoc to avoid quoting issues
+          if ! git commit -F - <<'COMMIT_EOF'
+        $commit_msg
+        COMMIT_EOF
+          then
             echo "Failed to commit on attempt $attempt"
             git reset --hard HEAD
             continue
