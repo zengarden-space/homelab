@@ -111,7 +111,10 @@ runs:
 
         # Check if there are changes to commit
         if ! git diff --cached --quiet; then
-          git commit -m "Deploy ${{ github.repository }} to ${{ inputs.environment }}: ${{ github.event.head_commit.message }} ${{ github.sha }}"
+          # Use heredoc to avoid quoting issues with commit message
+          git commit -F - <<'COMMIT_EOF'
+Deploy ${{ github.repository }} to ${{ inputs.environment }}: ${{ github.event.head_commit.message }} ${{ github.sha }}
+COMMIT_EOF
           git push -f origin ${{ steps.branch.outputs.name }}
         else
           echo "No changes to commit"
