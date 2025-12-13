@@ -113,7 +113,7 @@ runs:
         if ! git diff --cached --quiet; then
           # Use heredoc to avoid quoting issues with commit message
           git commit -F - <<'COMMIT_EOF'
-Deploy ${{ github.repository }} to ${{ inputs.environment }}: ${{ github.event.head_commit.message }} ${{ github.sha }}
+Deploy ${{ github.repository }} to ${{ inputs.environment }} - ${{ github.event.head_commit.message }} ${{ github.sha }}
 COMMIT_EOF
           git push -f origin ${{ steps.branch.outputs.name }}
         else
