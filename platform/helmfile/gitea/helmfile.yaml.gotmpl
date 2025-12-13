@@ -29,6 +29,15 @@ releases:
             existingSecret: gitea-admin
           actions:
             enabled: true
+          config:
+            packages:
+              ENABLED: true
+              CHUNKED_UPLOAD_PATH: /data/tmp/package-upload
+            packages.cleanup:
+              ENABLED: true
+              RUN_AT_START: true
+              SCHEDULE: "@midnight"
+              OLDER_THAN: 240h
         persistence:
           enabled: true
           size: 50Gi
