@@ -98,7 +98,7 @@ runs:
           fi
 
           # Commit changes using heredoc to avoid quoting issues
-          if ! git commit -F - <<'COMMIT_EOF'
+          if ! git commit -F - <<COMMIT_EOF
         $commit_msg
         COMMIT_EOF
           then
