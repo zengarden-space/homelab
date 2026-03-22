@@ -69,6 +69,13 @@ releases:
       - defaultMasterPassword:
           enabled: false
         installCRDs: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
 
   - name: master-password
     namespace: secrets-system
@@ -77,3 +84,4 @@ releases:
     chart: ./master-password
     values:
       - masterPassword: {{ .Values.derivedSecrets.masterPassword | quote }}
+

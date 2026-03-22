@@ -111,18 +111,18 @@ spec:
                 - /bin/sh
                 - -c
                 - pgrep -f "python3 /scripts/rbac-service.py" > /dev/null
-            initialDelaySeconds: 70
-            periodSeconds: 10
-            timeoutSeconds: 3
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
                 - pgrep -f "python3 /scripts/rbac-service.py" > /dev/null && test -d /shared
-            initialDelaySeconds: 65
-            periodSeconds: 5
-            timeoutSeconds: 3
+            initialDelaySeconds: 100
+            periodSeconds: 15
+            timeoutSeconds: 5
 
       volumes:
         - name: hooks

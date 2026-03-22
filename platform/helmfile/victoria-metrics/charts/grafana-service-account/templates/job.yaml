@@ -117,6 +117,22 @@ spec:
                 echo "Service account already exists with ID: $SA_ID"
               fi
 
+              # Delete existing token with same name if it exists
+              echo "Checking for existing token '$TOKEN_NAME'..."
+              TOKENS_LIST=$(curl -s "$GRAFANA_URL/api/serviceaccounts/$SA_ID/tokens" \
+                -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                -H "Content-Type: application/json")
+
+              EXISTING_TOKEN_ID=$(echo "$TOKENS_LIST" | grep -o "\"id\":[0-9]*,\"name\":\"$TOKEN_NAME\"" | grep -o '"id":[0-9]*' | cut -d':' -f2 || true)
+
+              if [ -n "$EXISTING_TOKEN_ID" ]; then
+                echo "Deleting existing token (ID: $EXISTING_TOKEN_ID)..."
+                curl -s -X DELETE "$GRAFANA_URL/api/serviceaccounts/$SA_ID/tokens/$EXISTING_TOKEN_ID" \
+                  -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -H "Content-Type: application/json"
+                echo "Existing token deleted"
+              fi
+
               # Create token
               echo "Creating token for service account..."
               TOKEN_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$GRAFANA_URL/api/serviceaccounts/$SA_ID/tokens" \

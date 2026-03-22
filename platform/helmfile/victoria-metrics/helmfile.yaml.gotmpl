@@ -16,6 +16,10 @@ repositories:
     url: https://grafana.github.io/helm-charts
 
 releases:
+  - name: vm-config
+    namespace: victoria-metrics
+    chart: ./charts/vm-config
+
   # Prometheus Operator CRDs (required by victoria-metrics-k8s-stack)
   - name: prometheus-operator-crds
     namespace: victoria-metrics
@@ -54,11 +58,11 @@ releases:
           size: 200Mi
         resources:
           requests:
-            memory: 128Mi
-            cpu: 100m
+            memory: 64Mi
+            cpu: 50m
           limits:
-            memory: 512Mi
-            cpu: 500m
+            memory: 256Mi
+            cpu: 200m
 
   - name: vm
     namespace: victoria-metrics
@@ -106,6 +110,17 @@ releases:
                   isDefault: false
                   editable: true
         
+        victoria-metrics-single:
+          server:
+            retentionPeriod: 30d
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 768Mi
+
         # k3s specifics
         kubeApiServer:
           enabled: false
@@ -221,6 +236,14 @@ releases:
             replication_factor: 1
           storage:
             type: 'filesystem'
+          limits_config:
+            retention_period: 48h
+            max_entries_limit_per_query: 5000
+          compactor:
+            working_directory: /var/loki/compactor
+            retention_enabled: true
+            delete_request_store: filesystem
+            compaction_interval: 30m
           schemaConfig:
             configs:
               - from: "2024-01-01"
@@ -237,8 +260,8 @@ releases:
             size: 10Gi
           resources:
             limits:
-              cpu: 1000m
-              memory: 1Gi
+              cpu: 500m
+              memory: 768Mi
             requests:
               cpu: 100m
               memory: 256Mi
@@ -345,10 +368,10 @@ releases:
                     target_label: __path__
         resources:
           limits:
-            cpu: 200m
-            memory: 256Mi
-          requests:
             cpu: 100m
             memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
         serviceMonitor:
           enabled: false

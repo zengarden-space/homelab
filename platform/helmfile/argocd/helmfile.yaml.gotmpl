@@ -35,15 +35,29 @@ releases:
           domain: argocd.homelab.int.{{ .Values.domain }}
 
         redis-ha:
-          enabled: true
+          enabled: false
 
         controller:
           replicas: 1
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              cpu: 1000m
+              memory: 768Mi
 
         server:
           autoscaling:
             enabled: true
-            minReplicas: 2
+            minReplicas: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
           ingress:
             enabled: true
             ingressClassName: internal
@@ -57,10 +71,17 @@ releases:
         repoServer:
           autoscaling:
             enabled: true
-            minReplicas: 2
+            minReplicas: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
 
-        application:
-          replicas: 2
+        applicationSet:
+          replicas: 1
 
         configs:
           secret:

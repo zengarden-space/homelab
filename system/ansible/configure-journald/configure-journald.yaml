@@ -1,0 +1,58 @@
+- name: Configure systemd journal rotation on blade servers
+  become: true
+  hosts: all
+  tasks:
+    - name: Ping hosts
+      ansible.builtin.ping:
+
+    - name: Check current journal disk usage
+      command: journalctl --disk-usage
+      register: journal_usage_before
+      changed_when: false
+
+    - name: Display current journal usage
+      debug:
+        var: journal_usage_before.stdout
+
+    - name: Create journald.conf.d directory if missing
+      file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure journald size and retention limits
+      copy:
+        dest: /etc/systemd/journald.conf.d/retention.conf
+        content: |
+          [Journal]
+          SystemMaxUse=500M
+          MaxRetentionSec=7day
+        owner: root
+        group: root
+        mode: '0644'
+      register: journald_config
+
+    - name: Restart systemd-journald to apply config
+      systemd:
+        name: systemd-journald
+        state: restarted
+      when: journald_config.changed
+
+    - name: Vacuum journal to enforce new limits
+      command: journalctl --vacuum-size=500M --vacuum-time=7d
+      register: vacuum_result
+      changed_when: "'Vacuuming done' in vacuum_result.stdout or 'Deleted' in vacuum_result.stdout"
+
+    - name: Check journal disk usage after cleanup
+      command: journalctl --disk-usage
+      register: journal_usage_after
+      changed_when: false
+
+    - name: Display cleanup summary
+      debug:
+        msg:
+          - "Journal usage on {{ inventory_hostname }}"
+          - "Before: {{ journal_usage_before.stdout }}"
+          - "After: {{ journal_usage_after.stdout }}"

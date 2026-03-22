@@ -67,6 +67,13 @@ releases:
             - hosts:
                 - gitea.homelab.int.{{ .Values.domain }}
               secretName: gitea-tls
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
         strategy:
           type: RollingUpdate
           rollingUpdate:
@@ -79,6 +86,14 @@ releases:
             - name: GITEA__WEBHOOK__ALLOWED_HOST_LIST
               value: "argocd.homelab.int.{{ .Values.domain }}"
         postgresql-ha:
+          pgpool:
+            resources:
+              requests:
+                memory: 512Mi
+                cpu: 250m
+              limits:
+                memory: 768Mi
+                cpu: 500m
           service:
             ports:
               postgresql: 5432

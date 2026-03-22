@@ -1,0 +1,4 @@
+apiVersion: v2
+name: vm-config
+description: VictoriaMetrics namespace configuration (network policies, quotas, PDBs)
+version: 1.0.0

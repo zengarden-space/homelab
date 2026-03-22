@@ -25,6 +25,8 @@ releases:
     version: 2.22.2
     values:
       - replicaCount: 1
+        strategy:
+          type: Recreate
         timeZone: UTC
         database:
           type: h2
@@ -48,9 +50,19 @@ releases:
                 - metabase.homelab.int.{{ .Values.domain }}
               secretName: metabase-tls
 
+        resources:
+          requests:
+            cpu: 200m
+            memory: 768Mi
+          limits:
+            cpu: 1000m
+            memory: 1200Mi
+
         extraEnv:
           - name: MB_PLUGINS_DIR
             value: /tmp/plugins
+          - name: JAVA_OPTS
+            value: "-Xmx768m -Xms256m"
 
         extraVolumes:
           - name: tmp

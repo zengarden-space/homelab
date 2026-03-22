@@ -6,7 +6,7 @@ gitea:
   image: "docker.gitea.com/gitea:1.23.8-rootless"
 
 runner:
-  replicas: 5
+  replicas: 2
   image: "gitea/act_runner:0.2.11"
 
 imagePullSecrets: {}
