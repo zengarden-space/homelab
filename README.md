@@ -15,4 +15,4 @@ Briefly to install homelab:
 11. helmfile sync
 ```
 
-For full details see https://homelab.zengarden.space
+For full details see https://oleksiyp.github.io/homelab

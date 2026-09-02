@@ -4,6 +4,9 @@ import {Layout, Navbar, Footer} from 'nextra-theme-docs'
 import {Head} from 'nextra/components'
 import 'nextra-theme-docs/style.css'
 
+// Plain <img>/<a> are not rewritten by Next.js, unlike next/image and next/link.
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+
 export default async function RootLayout({children}: { children: ReactNode }) {
     const pageMap = await getPageMap()
 
@@ -27,10 +30,10 @@ export default async function RootLayout({children}: { children: ReactNode }) {
             navbar={
                 <Navbar
                     logo={<div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                        <img src="/logo.png" alt="Logo" style={{height: '32px'}}/>
+                        <img src={`${basePath}/logo.png`} alt="Logo" style={{height: '32px'}}/>
                         <span style={{fontWeight: 'bold'}}>Homelab</span>
                     </div>}
-                    projectLink="https://github.com/zengarden-space"
+                    projectLink="https://github.com/oleksiyp/homelab"
                 />
             }
             footer={
@@ -38,8 +41,8 @@ export default async function RootLayout({children}: { children: ReactNode }) {
                     {new Date().getFullYear()} © zengarden.space homelab documentation
                 </Footer>
             }
-            docsRepositoryBase="https://gitea.homelab.int.zengarden.space/zengarden-space"
-            editLink={null}
+            docsRepositoryBase="https://github.com/oleksiyp/homelab/edit/main/docs"
+            editLink="Edit this page on GitHub"
             feedback={{content: null}}
             darkMode={false}
             nextThemes={{
